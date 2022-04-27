@@ -39,6 +39,7 @@ xi2 = [3999] * len(col2)
 # super collection
 COL0 = cube1 + cube2
 xi_vector = np.array(xi1 + xi2)
+print('xi_vector: ',  xi_vector)
 #magpy.show(cube1, cube2, sensors)
 
 # add sensors

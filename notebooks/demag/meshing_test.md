@@ -15,8 +15,10 @@ kernelspec:
 import magpylib as magpy
 import numpy as np
 import plotly.graph_objects as go
-from demag_functions import mesh_cylinder
+from meshing_functions import mesh_cuboid, mesh_cylinder, mesh_with_cubes
 ```
+
+# Exact meshing
 
 ```{code-cell} ipython3
 cyl = magpy.magnet.CylinderSegment(
@@ -27,10 +29,11 @@ cyl.move((0, 0, 0))
 cyl.style.magnetization.show = False
 cyl.style.opacity = 0.5
 
-mesh = mesh_cylinder(cyl, 100)
+mesh = mesh_cylinder(cyl, 20)
 mesh.set_children_styles(magnetization_show=False)
 
-sens = magpy.Sensor().move(np.linspace((-5,0,0),(5,0,0), 101), start=0)
+epsilon = 1e-5
+sens = magpy.Sensor().move(np.linspace((-5,epsilon,epsilon),(5,epsilon,epsilon), 101), start=0)
 
 magpy.show(sens, cyl, *mesh, backend="plotly")
 mesh
@@ -40,13 +43,39 @@ mesh
 fig = go.FigureWidget()
 fig.add_scatter(y=sens.getB(cyl).T[2], name='B-field single')
 fig.add_scatter(y=sens.getB(mesh).T[2], name='B-field mesh')
-fig.add_scatter(y=sens.getH(cyl).T[2], name='H-field single')
-fig.add_scatter(y=sens.getH(mesh).T[2], name='H-field mesh')
+#fig.add_scatter(y=sens.getH(cyl).T[2], name='H-field single')
+#fig.add_scatter(y=sens.getH(mesh).T[2], name='H-field mesh')
 fig.show()
 ```
 
-```{code-cell} ipython3
+# Mesh with cuboids
 
+```{code-cell} ipython3
+obj = magpy.magnet.CylinderSegment((100, 200, 300), (10, 30, 50, 0, 360)).move(
+    (2.2, 0, 0)
+)
+# obj = magpy.magnet.Cuboid((1, 0, 0), (1, 1, 1))
+# obj = magpy.magnet.Cylinder((0, 0, 1), (1, 1))
+# obj = magpy.magnet.Sphere((0, 0, 1), 1)
+
+# obj.move([10,0,0]).rotate_from_angax(75, (1,5,6), anchor=0)
+
+meshed_obj = mesh_with_cubes(obj, target_elems=1100, strict_inside=True)
+meshed_obj
+```
+
+```{code-cell} ipython3
+import plotly.graph_objects as go
+
+fig = go.Figure()
+magpy.show(
+    # obj,
+    meshed_obj,
+    canvas=fig,
+    # backend="matplotlib",
+    backend="plotly",
+)
+fig
 ```
 
 ```{code-cell} ipython3
