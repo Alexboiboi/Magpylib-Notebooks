@@ -19,8 +19,7 @@ def apportion_triple(triple, min_val=1, max_iter=30):
             triple[amin] *= factor**1.5
     return triple
 
-
-def divide_from_dimension(
+def cells_from_dimension(
     dim,
     target_elems,
     min_val=1,
@@ -46,16 +45,38 @@ def divide_from_dimension(
     parity: {None, 'odd', 'even'}
         All elements of the resulting triple will match the given parity. If `None`, no parity
         check is performed.
+    
+    Returns
+    -------
+    numpy.ndarray of length 3
+        array corresponding of the number of divisions for each dimension
+    
+    Examples
+    --------
+    >>> cells_from_dimension([1, 2, 6], 926, parity=None, strict_max=True)
+    [ 4  9 25]  # Actual total: 900
+    >>> cells_from_dimension([1, 2, 6], 926, parity=None, strict_max=False)
+    [ 4  9 26]  # Actual total: 936
+    >>> cells_from_dimension([1, 2, 6], 926, parity='odd', strict_max=True)
+    [ 3 11 27]  # Actual total: 891
+    >>> cells_from_dimension([1, 2, 6], 926, parity='odd', strict_max=False)
+    [ 5  7 27]  # Actual total: 945
+    >>> cells_from_dimension([1, 2, 6], 926, parity='even', strict_max=True)
+    [ 4  8 26]  # Actual total: 832
+    >>> cells_from_dimension([1, 2, 6], 926, parity='even', strict_max=False)
+    [ 4 10 24]  # Actual total: 960
     """
     elems = np.prod(target_elems)  # in case target_elems is an iterable
 
     # define parity functions
     if parity == "odd":
         funcs = [
-            lambda x: 2 * fn(x / 2) + i for fn in (np.ceil, np.floor) for i in (-1, 1)
+            lambda x, add=add, fn=fn: int(2 * fn(x / 2) + add)
+            for add in (-1, 1)
+            for fn in (np.ceil, np.floor)
         ]
     elif parity == "even":
-        funcs = [lambda x: 2 * fn(x / 2) for fn in (np.ceil, np.floor)]
+        funcs = [lambda x, fn=fn: int(2 * fn(x / 2)) for fn in (np.ceil, np.floor)]
     else:
         funcs = [np.ceil, np.floor]
 
@@ -67,46 +88,47 @@ def divide_from_dimension(
     a = x ** (2 / 3) * (elems / y / z) ** (1 / 3)
     b = y ** (2 / 3) * (elems / x / z) ** (1 / 3)
     c = z ** (2 / 3) * (elems / x / y) ** (1 / 3)
-
     a, b, c = apportion_triple((a, b, c), min_val=min_val)
     epsilon = elems
     # run all combinations of rounding methods, including parity matching to find the closest
     # triple with the target_elems constrain
-    result = [int(k) for k in (a, b, c)]  # first guess
+    result = [funcs[0](k) for k in (a, b, c)]  # first guess
     for funcs in product(*[funcs] * 3):
-        res = [int(f(k)) for f, k in zip(funcs, (a, b, c))]
+        res = [f(k) for f, k in zip(funcs, (a, b, c))]
         epsilon_new = elems - np.prod(res)
-        if np.abs(epsilon_new) < epsilon and all(r >= min_val for r in res):
+        if np.abs(epsilon_new) <= epsilon and all(r >= min_val for r in res):
             if not strict_max or epsilon_new >= 0:
                 epsilon = np.abs(epsilon_new)
                 result = res
     return np.array(result).astype(int)
 
 
-def mesh_cuboid(cuboid, target_elems, verbose=False):
+def mesh_Cuboid(cuboid, target_elems, verbose=False):
     """
-    Splits Cuboid up into small Cuboid cells
+    Split Cuboid up into small Cuboid cells
 
     Parameters
     ----------
-    cuboid: magpylib.Cuboid object
+    cuboid: magpylib.magnet.Cuboid object
         input object to be discretized
-
-    target_elems: target number of divisions
+    target_elems: int
+        target number of cells
+    verbose: bool
+        If True, prints out meshing information
 
     Returns
     -------
     discretization: magpylib.Collection
         Collection of Cuboid cells
     """
-
+    # TODO: make function compatible with paths
     # load cuboid properties
     pos = cuboid.position
     rot = cuboid.orientation
     dim = cuboid.dimension
     mag = cuboid.magnetization
 
-    nnn = divide_from_dimension(dim, target_elems)
+    nnn = cells_from_dimension(dim, target_elems)
     elems = np.prod(nnn)
     if verbose:
         print(
@@ -134,7 +156,23 @@ def mesh_cuboid(cuboid, target_elems, verbose=False):
     return magpy.Collection(cells)
 
 
-def mesh_cylinder(cylinder, target_elems, verbose=False):
+def mesh_Cylinder(cylinder, target_elems, verbose=False):
+    """
+    Split `Cylinder` or `CylinderSegment` up into small cylindrical or cylinder segment cells
+
+    Parameters
+    ----------
+    cylinder: `magpylib.magnet.Cylinder` or  `magpylib.magnet.CylinderSegment` object
+        input object to be discretized
+    target_elems: int
+        target number of cells
+    verbose: bool
+        If True, prints out meshing information
+
+    Returns
+    -------
+    discretization: magpylib.Collection
+        Collection of Cylinder and CylinderSegment cells"""
     if isinstance(cylinder, magpy.magnet.CylinderSegment):
         r1, r2, h, phi1, phi2 = cylinder.dimension
     elif isinstance(cylinder, magpy.magnet.Cylinder):
@@ -154,7 +192,9 @@ def mesh_cylinder(cylinder, target_elems, verbose=False):
     al = (r2 + r1) * 3.14 * (phi2 - phi1) / 360  # arclen = D*pi*arcratio
     dim = al, r2 - r1, h
 
-    res = nphi, nr, nh = divide_from_dimension(dim, target_elems)
+    # "unroll" the cylinder and distribute the target number of elemens along the circumference,
+    # radius and height.
+    res = nphi, nr, nh = cells_from_dimension(dim, target_elems)
     elems = np.prod(res)
     if verbose:
         print(
@@ -165,10 +205,12 @@ def mesh_cylinder(cylinder, target_elems, verbose=False):
     dh = h / nh
     cyl_segs = []
     for r_ind in range(nr):
+        # redistribute number divisions proportionally to the radius
         nphi_r = max(1, int(r[r_ind + 1] / ((r1 + r2) / 2) * nphi))
         phi = np.linspace(phi1, phi2, nphi_r + 1)
         for h_ind in range(nh):
             pos_h = dh * h_ind - h / 2 + dh / 2
+            # use a cylinder for the innermost cells, cylinder segment otherwise
             if r[r_ind] == 0 and phi2 - phi1 == 360:
                 cylinder_class = magpy.magnet.Cylinder
                 dimension = r[r_ind + 1] * 2, dh
@@ -193,7 +235,9 @@ def mesh_cylinder(cylinder, target_elems, verbose=False):
 
 
 def get_volume(obj, return_containing_cube_edge=False):
-    """return obj volume in mm^3"""
+    """Return object volume in mm^3. The `containting_cube_edge` is the mininum side length of an
+    unrotated cube centered at the origin containing the object.
+    """
     if obj._object_type == "Cuboid":
         dim = obj.dimension
         vol = dim[0] * dim[1] * dim[2]
@@ -217,6 +261,7 @@ def get_volume(obj, return_containing_cube_edge=False):
 
 
 def mask_inside_Cuboid(obj, positions, tolerance=1e-14):
+    """Return mask of provided positions inside a Cuboid"""
     a, b, c = obj.dimension / 2
     x, y, z = positions.T
     mx = (abs(x) - a) < tolerance * a
@@ -226,6 +271,7 @@ def mask_inside_Cuboid(obj, positions, tolerance=1e-14):
 
 
 def mask_inside_Cylinder(obj, positions, tolerance=1e-14):
+    """Return mask of provided positions inside a Cylinder"""
     # transform to Cy CS
     x, y, z = positions.T
     r, phi = np.sqrt(x**2 + y**2), np.arctan2(y, x)
@@ -243,6 +289,7 @@ def mask_inside_Cylinder(obj, positions, tolerance=1e-14):
 
 
 def mask_inside_Sphere(obj, positions, tolerance=1e-14):
+    """Return mask of provided positions inside a Sphere"""
     x, y, z = np.copy(positions.T)
     r = np.sqrt(x**2 + y**2 + z**2)  # faster than np.linalg.norm
     r0 = abs(obj.diameter) / 2
@@ -250,7 +297,7 @@ def mask_inside_Sphere(obj, positions, tolerance=1e-14):
 
 
 def mask_inside_CylinderSegment(obj, positions, tolerance=1e-14):
-
+    """Return mask of provided positions inside a CylinderSegment"""
     close = lambda arg1, arg2: np.isclose(arg1, arg2, rtol=tolerance, atol=tolerance)
     r1, r2, h, phi1, phi2 = obj.dimension.T
     r1 = abs(r1)
@@ -291,6 +338,7 @@ def mask_inside_CylinderSegment(obj, positions, tolerance=1e-14):
 
 
 def mask_inside(obj, positions, tolerance=1e-14):
+    """Return mask of provided positions inside a Magpylib object"""
     mask_inside_funcs = {
         "Cuboid": mask_inside_Cuboid,
         "Cylinder": mask_inside_Cylinder,
@@ -303,7 +351,24 @@ def mask_inside(obj, positions, tolerance=1e-14):
     return func(obj, positions, tolerance)
 
 def mesh_with_cubes(obj, target_elems, strict_inside=True):
+    """
+    Split-up a Magpylib magnet into a regular grid of identical cells. A grid of identical cube
+    cells and containing the object is created. Only the cells with their barycenter inside the
+    original object are kept.
 
+    Parameters
+    ----------
+    obj: `magpylib.magnet` object
+        input object to be discretized
+    target_elems: int
+        target number of cells
+    strict inside: bool
+        If True, also filters out the cells with vertices outside the object boundaries
+
+    Returns
+    -------
+    discretization: magpylib.Collection
+        Collection of Cylinder and CylinderSegment cells"""
     vol, containing_cube_edge = get_volume(obj, return_containing_cube_edge=True)
     vol_ratio = (containing_cube_edge**3) / vol
 
@@ -313,9 +378,9 @@ def mesh_with_cubes(obj, target_elems, strict_inside=True):
     slices = [slice(-d / 2, d / 2, N * 1j) for d, N in zip(grid_dim, grid_elems)]
     grid = np.mgrid[slices].reshape(len(slices), -1).T
     grid = grid[mask_inside(obj, grid, tolerance=1e-14)]
-    cube_dim = np.array([containing_cube_edge / (grid_elems[0] - 1)] * 3)
+    cube_cell_dim = np.array([containing_cube_edge / (grid_elems[0] - 1)] * 3)
     if strict_inside:
-        elemgrid = np.array(list(product(*[[-cube_dim[0] / 2, cube_dim[0] / 2]] * 3)))
+        elemgrid = np.array(list(product(*[[-cube_cell_dim[0] / 2, cube_cell_dim[0] / 2]] * 3)))
         cube_grid = np.array([elemgrid + pos for pos in grid])
         pos_inside_strict_mask = np.all(
             mask_inside(obj, cube_grid.reshape(-1, 3)).reshape(cube_grid.shape[:-1]),
@@ -329,7 +394,7 @@ def mesh_with_cubes(obj, target_elems, strict_inside=True):
     obj_list = [
         magpy.magnet.Cuboid(
             magnetization=obj.magnetization,
-            dimension=cube_dim,
+            dimension=cube_cell_dim,
             position=pos,
             orientation=obj.orientation,
         )

@@ -4,7 +4,7 @@ import numpy as np
 import magpylib as magpy
 
 
-def demag_tensor(src_list, store=False, load=False):
+def demag_tensor(src_list, store=False, load=False, verbose=False):
     """
     Compute the demagnetization tensor T based on point matching (see Chadbec 2006)
     for n sources in the input collection.
@@ -19,7 +19,10 @@ def demag_tensor(src_list, store=False, load=False):
 
     load: `False` or filename (str)
         Try to load T from filename.npy.
-
+        
+    verbose: bool
+        If True, prints out demagnetization process informations
+        
     Returns
     -------
     Demagnetization tensor: ndarray, shape (3,n,n,3)
@@ -35,16 +38,15 @@ def demag_tensor(src_list, store=False, load=False):
 
     # load pre-computed tensor
     if isinstance(load, str):
-        try:
-            T = np.load(load + '.npy')
+        T = np.load(load + '.npy')
+        if verbose:
             print(' - load pre-computed demagnetization tensor')
-            if n != T.shape[1]:
-                raise ValueError('Loaded demag tensor is not of same shape as input collection')
-            return T
-        except FileNotFoundError:
-            print(' - file not found')
+        if n != T.shape[1]:
+            raise ValueError('Loaded demag tensor is not of same shape as input collection')
+        return T
 
-    print(" - computing demagnetization tensor")
+    if verbose:
+        print(" - computing demagnetization tensor")
 
     # compute cell positions
     pos = np.empty((n,3))
@@ -67,12 +69,15 @@ def demag_tensor(src_list, store=False, load=False):
 
     # store tensor
     if isinstance(store, str):
-        np.save(store + '.npy', T)
+        fn = store + '.npy'
+        if verbose:
+            print(f'Saving demagnetization tensor to {fn}')
+        np.save(fn, T)
 
     return T
 
 
-def invert(matrix, solver):
+def invert(matrix, solver, verbose=False):
     """
     Matrix inversion
 
@@ -83,6 +88,9 @@ def invert(matrix, solver):
 
     solver: str
         Solver to be used. Must be one of (np.linalg.inv, ).
+        
+    verbose: bool
+        If True, prints out process informations
 
     Returns
     -------
@@ -92,7 +100,8 @@ def invert(matrix, solver):
     TODO implement and test different solver packages
     TODO check input matrix and auto-select correct solver (direct, iterative, ...)
     """
-    print(' - solving with '+ solver)
+    if verbose:
+        print(' - solving with '+ solver)
 
     if solver == 'np.linalg.inv':
         return np.linalg.inv(matrix)
@@ -107,6 +116,7 @@ def apply_demag(
     demag_store=False,
     demag_load=False,
     inplace=True,
+    verbose=False,
     ):
     '''
     Computes the interaction between all collection magnets and fixes their magnetization.
@@ -128,6 +138,9 @@ def apply_demag(
     demag_load: `False` or filename (str)
         Try to load demagnetization tensor T from filename.npy.
 
+    verbose: bool
+        If True, prints out demagnetization process informations
+
     Returns
     -------
     None
@@ -136,7 +149,8 @@ def apply_demag(
         collection = collection.copy()
     n = len(collection.sources_all)
 
-    print(f'Starting demag computation with {n} cells.')
+    if verbose:
+        print(f'Starting demag computation with {n} cells.')
 
     # set up mr
     mag = [src.orientation.apply(src.magnetization) for src in collection.sources_all]    # ROTATION CHECK
@@ -153,6 +167,7 @@ def apply_demag(
         collection.sources_all,
         store=demag_store,
         load=demag_load,
+        verbose=verbose,
     ) # shape (3 mag unit, n cells, n positions, 3 Bxyz)
     #T = T.swapaxes(0, 3)
     T = T*(4*np.pi/10)
@@ -161,7 +176,7 @@ def apply_demag(
 
     # set up and invert Q
     Q = np.eye(3*n) - np.matmul(S, T)
-    Q_inv = invert(matrix=Q, solver=solver)
+    Q_inv = invert(matrix=Q, solver=solver, verbose=verbose)
 
     # determine new magnetization vectors
     mag_new = np.matmul(Q_inv, mag)
@@ -171,6 +186,7 @@ def apply_demag(
     for s,mag in zip(collection.sources_all, mag_new):
         s.magnetization = s.orientation.inv().apply(mag)   # ROTATION CHECK
 
-    print('Demag computation completed.')
+    if verbose:
+        print('Demag computation completed.')
     if not inplace:
         return collection

@@ -17,7 +17,8 @@ import magpylib as magpy
 import numpy as np
 import pandas as pd
 import plotly.express as px
-from demag_functions import apply_demag, mesh_cuboid
+from demag_functions import apply_demag
+from meshing_functions import mesh_Cuboid
 
 elems = 200  # mesh factor
 
@@ -25,7 +26,7 @@ elems = 200  # mesh factor
 mag1 = (0, 0, 1000)
 dim1 = (1, 1, 2)
 cube1 = magpy.magnet.Cuboid(mag1, dim1, (0, 0, 0.5))
-col1 = mesh_cuboid(cube1, elems)
+col1 = mesh_Cuboid(cube1, elems)
 xi1 = [0.5] * len(col1)
 
 # soft magnet
@@ -33,13 +34,12 @@ mag2 = (0, 0, 0)
 dim2 = (1, 1, 1)
 cube2 = magpy.magnet.Cuboid(mag2, dim2, (0, 0, 0))
 cube2.rotate_from_angax(angle=45, axis="y", anchor=None).move((1.5, 0, 0))
-col2 = mesh_cuboid(cube2, elems)
+col2 = mesh_Cuboid(cube2, elems)
 xi2 = [3999] * len(col2)
 
 # super collection
 COL0 = cube1 + cube2
 xi_vector = np.array(xi1 + xi2)
-print('xi_vector: ',  xi_vector)
 #magpy.show(cube1, cube2, sensors)
 
 # add sensors
@@ -109,6 +109,7 @@ fig = px.line(
     facet_row="variable",
     color="Source_type",
     height=600,
+    title='FEM vs Magpylib vs Magpylib+Demag',
 )
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
@@ -129,6 +130,11 @@ fig = px.line(
     facet_row="variable",
     color="Source_type",
     height=600,
+    title='Magpylib & Magpylib+Demag (diff vs FEM-fine)',
 )
 fig.update_yaxes(matches=None, showticklabels=True)
+```
+
+```{code-cell} ipython3
+
 ```
