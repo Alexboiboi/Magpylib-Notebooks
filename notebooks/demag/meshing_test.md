@@ -13,45 +13,50 @@ kernelspec:
 ---
 
 ```{code-cell} ipython3
+%load_ext autoreload
+%autoreload 2
+```
+
+```{code-cell} ipython3
 import magpylib as magpy
 import numpy as np
 import plotly.graph_objects as go
-from meshing_functions import mesh_cuboid, mesh_cylinder, mesh_with_cubes
+from meshing_functions import mesh_Cuboid, mesh_Cylinder, mesh_with_cubes
 ```
 
 # Exact meshing
 
 ```{code-cell} ipython3
 cyl = magpy.magnet.CylinderSegment(
-    magnetization=(0, 0, 1000), dimension=(0, 2, 1, 0, 360)
+    magnetization=(0, 0, 1000), dimension=(1, 2, 1, 0, 360)
 )
 cyl.move((0, 0, 0))
-#cyl.rotate_from_angax(45, "y")
-cyl.style.magnetization.show = False
-cyl.style.opacity = 0.5
+# cyl.rotate_from_angax(45, "y")
 
-mesh = mesh_cylinder(cyl, 20)
-mesh.set_children_styles(magnetization_show=False)
+mesh = mesh_Cylinder(cyl, 50)
+mesh.set_children_styles(magnetization_show=True, magnetization_color_mode='bicolor', magnetization_color_transition=0)
 
 epsilon = 1e-5
-sens = magpy.Sensor().move(np.linspace((-5,epsilon,epsilon),(5,epsilon,epsilon), 101), start=0)
-
-magpy.show(sens, cyl, *mesh, backend="plotly")
-mesh
+sens = magpy.Sensor().move(
+    np.linspace((-5, epsilon, epsilon), (5, epsilon, epsilon), 101), start=0
+)
+fig = go.FigureWidget()
+magpy.show(mesh, canvas=fig, backend="plotly")
+fig
 ```
 
 ```{code-cell} ipython3
 fig = go.FigureWidget()
-fig.add_scatter(y=sens.getB(cyl).T[2], name='B-field single')
-fig.add_scatter(y=sens.getB(mesh).T[2], name='B-field mesh')
-#fig.add_scatter(y=sens.getH(cyl).T[2], name='H-field single')
-#fig.add_scatter(y=sens.getH(mesh).T[2], name='H-field mesh')
+fig.add_scatter(y=sens.getB(cyl).T[2], name="B-field single")
+fig.add_scatter(y=sens.getB(mesh).T[2], name="B-field mesh")
+# fig.add_scatter(y=sens.getH(cyl).T[2], name='H-field single')
+# fig.add_scatter(y=sens.getH(mesh).T[2], name='H-field mesh')
 fig.show()
 ```
 
 # Mesh with cuboids
 
-```{code-cell} ipython3
+```{raw-cell}
 obj = magpy.magnet.CylinderSegment((100, 200, 300), (10, 30, 50, 0, 360)).move(
     (2.2, 0, 0)
 )
@@ -60,8 +65,9 @@ obj = magpy.magnet.CylinderSegment((100, 200, 300), (10, 30, 50, 0, 360)).move(
 # obj = magpy.magnet.Sphere((0, 0, 1), 1)
 
 # obj.move([10,0,0]).rotate_from_angax(75, (1,5,6), anchor=0)
-
-meshed_obj = mesh_with_cubes(obj, target_elems=1100, strict_inside=True)
+meshed_obj = mesh_with_cubes(obj, 1000, strict_inside=True)
+elems = len(meshed_obj)
+meshed_obj.style.label=f"{elems} cuboids"
 meshed_obj
 ```
 
@@ -77,8 +83,4 @@ magpy.show(
     backend="plotly",
 )
 fig
-```
-
-```{code-cell} ipython3
-
 ```

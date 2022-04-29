@@ -1,7 +1,12 @@
+# +
 from itertools import product
 
-import numpy as np
+from scipy.spatial.transform import Rotation as R
 import magpylib as magpy
+import numpy as np
+
+
+# -
 
 def apportion_triple(triple, min_val=1, max_iter=30):
     """Apportion values of a triple, so that the minimum value `min_val` is respected
@@ -45,12 +50,12 @@ def cells_from_dimension(
     parity: {None, 'odd', 'even'}
         All elements of the resulting triple will match the given parity. If `None`, no parity
         check is performed.
-    
+
     Returns
     -------
     numpy.ndarray of length 3
         array corresponding of the number of divisions for each dimension
-    
+
     Examples
     --------
     >>> cells_from_dimension([1, 2, 6], 926, parity=None, strict_max=True)
@@ -110,9 +115,9 @@ def mesh_Cuboid(cuboid, target_elems, verbose=False):
     Parameters
     ----------
     cuboid: magpylib.magnet.Cuboid object
-        input object to be discretized
+        Input object to be discretized
     target_elems: int
-        target number of cells
+        Target number of cells
     verbose: bool
         If True, prints out meshing information
 
@@ -163,9 +168,9 @@ def mesh_Cylinder(cylinder, target_elems, verbose=False):
     Parameters
     ----------
     cylinder: `magpylib.magnet.Cylinder` or  `magpylib.magnet.CylinderSegment` object
-        input object to be discretized
+        Input object to be discretized
     target_elems: int
-        target number of cells
+        Target number of cells
     verbose: bool
         If True, prints out meshing information
 
@@ -359,9 +364,9 @@ def mesh_with_cubes(obj, target_elems, strict_inside=True):
     Parameters
     ----------
     obj: `magpylib.magnet` object
-        input object to be discretized
+        Input object to be discretized
     target_elems: int
-        target number of cells
+        Target number of cells
     strict inside: bool
         If True, also filters out the cells with vertices outside the object boundaries
 
@@ -380,7 +385,9 @@ def mesh_with_cubes(obj, target_elems, strict_inside=True):
     grid = grid[mask_inside(obj, grid, tolerance=1e-14)]
     cube_cell_dim = np.array([containing_cube_edge / (grid_elems[0] - 1)] * 3)
     if strict_inside:
-        elemgrid = np.array(list(product(*[[-cube_cell_dim[0] / 2, cube_cell_dim[0] / 2]] * 3)))
+        elemgrid = np.array(
+            list(product(*[[-cube_cell_dim[0] / 2, cube_cell_dim[0] / 2]] * 3))
+        )
         cube_grid = np.array([elemgrid + pos for pos in grid])
         pos_inside_strict_mask = np.all(
             mask_inside(obj, cube_grid.reshape(-1, 3)).reshape(cube_grid.shape[:-1]),
@@ -401,3 +408,52 @@ def mesh_with_cubes(obj, target_elems, strict_inside=True):
         for pos in cube_poss
     ]
     return magpy.Collection(obj_list)
+
+
+def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_limit=10):
+    """
+    Split-up a Magpylib thin-walled cylinder segment into cuboid cells.
+
+    Parameters
+    ----------
+    cyl_seg: `magpylib.magnet.CylinderSegment` object
+        CylinderSegment object to be discretized
+    target_elems: int
+        Target number of cells
+    strict thin_ratio_limit: positive number,
+        Sets the r2/(r2-r1) limit to be considered as thin-walled, r1 being the inner radius
+
+    Returns
+    -------
+    discretization: magpylib.Collection
+        Collection of Cuboid cells"""
+    
+    r1, r2, h, phi1, phi2 = cyl_seg.dimension
+    if thin_ratio_limit > r2 / (r2 - r1):
+        raise ValueError(
+            "This meshing function is intended for thin-walled CylinderSegment objects"
+            f" of radii-ratio r2/(r2-r1)>{thin_ratio_limit}, r1 being the inner radius."
+            f"\nInstead r2/(r2-r1)={r2 / (r2 - r1)}"
+        )
+    # distribute elements -> targeting thin close-to-square surface cells
+    circumf = 2 * np.pi * r1
+    nphi = int(np.round((target_elems * circumf/h)**0.5))
+    nh = int(np.round(target_elems / nphi))
+    dh = h / nh
+    dphi = 2 * np.pi / nphi * (phi2 - phi1) / 360
+    a, b, c = r2 - r1, 2 * r1 * np.sin(dphi / 2), dh  # cuboids edge sizes
+    x0 = r1 * np.cos(dphi / 2) + a / 2
+    phi_vec = np.linspace(
+        np.deg2rad(phi1) + dphi / 2, np.deg2rad(phi2) - dphi / 2, nphi
+    )
+    poss = np.array([x0 * np.cos(phi_vec), x0 * np.sin(phi_vec), np.zeros(nphi)]).T
+    rots = R.from_euler("z", phi_vec)
+    cuboids = [
+        magpy.magnet.Cuboid((1, 0, 0), (a, b, c), pos + np.array([0, 0, z]), orient)
+        for pos, orient in zip(poss, rots)
+        for z in np.linspace(-h / 2 + dh / 2, h / 2 - dh / 2, nh)
+    ]
+    col = magpy.Collection(cuboids)
+    col.orientation = cyl_seg.orientation
+    col.position = cyl_seg.position
+    return col
