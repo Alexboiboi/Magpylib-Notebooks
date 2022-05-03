@@ -449,7 +449,7 @@ def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_lim
     poss = np.array([x0 * np.cos(phi_vec), x0 * np.sin(phi_vec), np.zeros(nphi)]).T
     rots = R.from_euler("z", phi_vec)
     cuboids = [
-        magpy.magnet.Cuboid((1, 0, 0), (a, b, c), pos + np.array([0, 0, z]), orient)
+        magpy.magnet.Cuboid(cyl_seg.magnetization, (a, b, c), pos + np.array([0, 0, z]), orient)
         for pos, orient in zip(poss, rots)
         for z in np.linspace(-h / 2 + dh / 2, h / 2 - dh / 2, nh)
     ]
