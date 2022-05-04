@@ -1,9 +1,9 @@
 # +
 from itertools import product
 
-from scipy.spatial.transform import Rotation as R
 import magpylib as magpy
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 
 # -
@@ -110,14 +110,17 @@ def cells_from_dimension(
 
 def mesh_Cuboid(cuboid, target_elems, verbose=False):
     """
-    Split Cuboid up into small Cuboid cells
+    Split Magpylib cuboid up into small cuboid cells
 
     Parameters
     ----------
     cuboid: magpylib.magnet.Cuboid object
         Input object to be discretized
-    target_elems: int
-        Target number of cells
+    target_elems: triple of int or int
+        Target number of cells. If `target_elems` is a triple of integers, the number of divisions
+        corresponds respectively to the x,y,z components of the unrotated cuboid in the global CS.
+        If an integer, the number of divisions is apportioned proportionally to the cuboid
+        dimensions. The resulting meshing cuboid cells are then the closest to cubes as possible.
     verbose: bool
         If True, prints out meshing information
 
@@ -133,7 +136,10 @@ def mesh_Cuboid(cuboid, target_elems, verbose=False):
     dim = cuboid.dimension
     mag = cuboid.magnetization
 
-    nnn = cells_from_dimension(dim, target_elems)
+    if np.isscalar(target_elems):
+        nnn = cells_from_dimension(dim, target_elems)
+    else:
+        nnn = target_elems
     elems = np.prod(nnn)
     if verbose:
         print(
@@ -412,14 +418,17 @@ def mesh_with_cubes(obj, target_elems, strict_inside=True):
 
 def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_limit=10):
     """
-    Split-up a Magpylib thin-walled cylinder segment into cuboid cells.
+    Split-up a Magpylib thin-walled cylinder segment into cuboid cells. Over the thickness, only
+    one layer of cells is used.
 
     Parameters
     ----------
     cyl_seg: `magpylib.magnet.CylinderSegment` object
         CylinderSegment object to be discretized
-    target_elems: int
-        Target number of cells
+    target_elems: int or tuple of int,
+        If `target_elems` is a  tuple of integers, the cylinder segment is respectively divided
+        over circumference and height, if an integer, divisions are infered to build cuboids with
+        close to squared faces.
     strict thin_ratio_limit: positive number,
         Sets the r2/(r2-r1) limit to be considered as thin-walled, r1 being the inner radius
 
@@ -427,7 +436,7 @@ def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_lim
     -------
     discretization: magpylib.Collection
         Collection of Cuboid cells"""
-    
+
     r1, r2, h, phi1, phi2 = cyl_seg.dimension
     if thin_ratio_limit > r2 / (r2 - r1):
         raise ValueError(
@@ -437,8 +446,11 @@ def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_lim
         )
     # distribute elements -> targeting thin close-to-square surface cells
     circumf = 2 * np.pi * r1
-    nphi = int(np.round((target_elems * circumf/h)**0.5))
-    nh = int(np.round(target_elems / nphi))
+    if np.isscalar(target_elems):
+        nphi = int(np.round((target_elems * circumf / h) ** 0.5))
+        nh = int(np.round(target_elems / nphi))
+    else:
+        nphi, nh = target_elems
     dh = h / nh
     dphi = 2 * np.pi / nphi * (phi2 - phi1) / 360
     a, b, c = r2 - r1, 2 * r1 * np.sin(dphi / 2), dh  # cuboids edge sizes
@@ -449,7 +461,9 @@ def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_lim
     poss = np.array([x0 * np.cos(phi_vec), x0 * np.sin(phi_vec), np.zeros(nphi)]).T
     rots = R.from_euler("z", phi_vec)
     cuboids = [
-        magpy.magnet.Cuboid(cyl_seg.magnetization, (a, b, c), pos + np.array([0, 0, z]), orient)
+        magpy.magnet.Cuboid(
+            cyl_seg.magnetization, (a, b, c), pos + np.array([0, 0, z]), orient
+        )
         for pos, orient in zip(poss, rots)
         for z in np.linspace(-h / 2 + dh / 2, h / 2 - dh / 2, nh)
     ]
