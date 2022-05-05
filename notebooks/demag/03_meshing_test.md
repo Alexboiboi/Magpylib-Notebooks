@@ -38,7 +38,7 @@ magpy.defaults.display.style.magnet.magnetization.show = False
 
 ## Cuboid
 
-```{code-cell} ipython3
+```{raw-cell}
 cube = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(4, 3, 2)).move(
     (-1.5, 0, 0)
 )
@@ -47,7 +47,7 @@ target_elems = (2, 3, 4)
 print("Explicit mesh division, target_elems: ", target_elems)
 meshed_cube1 = mesh_Cuboid(cube, target_elems)
 magpy.show(*meshed_cube1)
-# implicit mesh division
+
 target_elems = 27
 print("Implicit mesh division, target_elems: ", target_elems)
 meshed_cube2 = mesh_Cuboid(cube, target_elems)
@@ -56,7 +56,7 @@ magpy.show(*meshed_cube2)
 
 ## Cylinder/CylinderSegment
 
-```{code-cell} ipython3
+```{raw-cell}
 cyl = magpy.magnet.CylinderSegment(
     magnetization=(0, 0, 1000), dimension=(1, 2, 1, 0, 360)
 )
@@ -93,7 +93,7 @@ fig.show()
 
 ## Mesh with cubes
 
-```{code-cell} ipython3
+```{raw-cell}
 objs = [
     magpy.magnet.CylinderSegment((100, 200, 300), (10, 30, 50, 0, 360)).move(
         (2.2, 0, 0)
@@ -120,9 +120,7 @@ for obj in objs:
 cyl_seg = magpy.magnet.CylinderSegment((100, 200, 300), (29, 30, 50, 0, 360)).move(
     (2.2, 0, 0)
 )
-```
 
-```{code-cell} ipython3
 target_elems = (6, 1)
 print("Explicit mesh division, target_elems: ", target_elems)
 cyl_seg_mesh1 = mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems)
