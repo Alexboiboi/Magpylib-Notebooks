@@ -169,14 +169,19 @@ def mesh_Cuboid(cuboid, target_elems, verbose=False):
 
 def mesh_Cylinder(cylinder, target_elems, verbose=False):
     """
-    Split `Cylinder` or `CylinderSegment` up into small cylindrical or cylinder segment cells
+    Split `Cylinder` or `CylinderSegment` up into small cylindrical or cylinder segment cells.
+    In case of the cylinder, the middle cells are cylinders, all other being cylinder segments
 
     Parameters
     ----------
     cylinder: `magpylib.magnet.Cylinder` or  `magpylib.magnet.CylinderSegment` object
         Input object to be discretized
     target_elems: int
-        Target number of cells
+        Target number of cells. If `target_elems` is a triple of integers, the number of divisions
+        corresponds respectively to the divisions along the circumference, over the radius and
+        over the height. If an integer, the number of divisions is apportioned proportionally to
+        the cylinder (or cylinder segment) dimensions. The resulting meshing cylinder segment
+        cells are then the closest to cubes as possible.
     verbose: bool
         If True, prints out meshing information
 
@@ -205,8 +210,11 @@ def mesh_Cylinder(cylinder, target_elems, verbose=False):
 
     # "unroll" the cylinder and distribute the target number of elemens along the circumference,
     # radius and height.
-    res = nphi, nr, nh = cells_from_dimension(dim, target_elems)
-    elems = np.prod(res)
+    if np.isscalar(target_elems):
+        nphi, nr, nh = cells_from_dimension(dim, target_elems)
+    else:
+        nphi, nr, nh = target_elems
+    elems = np.prod([nphi, nr, nh])
     if verbose:
         print(
             f"Meshing CylinderSegement with {nphi}x{nr}x{nh}={elems}"

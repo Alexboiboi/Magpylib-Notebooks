@@ -29,6 +29,7 @@ from meshing_functions import (
 )
 
 magpy.defaults.display.backend = "plotly"
+magpy.defaults.display.style.magnet.magnetization.show = False
 ```
 
 # Exact meshing
@@ -41,83 +42,94 @@ magpy.defaults.display.backend = "plotly"
 cube = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(4, 3, 2)).move(
     (-1.5, 0, 0)
 )
-# explicit mesh division
-meshed_cube1 = mesh_Cuboid(cube, (2, 3, 4))
-meshed_cube1.show()
+
+target_elems = (2, 3, 4)
+print("Explicit mesh division, target_elems: ", target_elems)
+meshed_cube1 = mesh_Cuboid(cube, target_elems)
+magpy.show(*meshed_cube1)
 # implicit mesh division
-meshed_cube2 = mesh_Cuboid(cube, 27)
-meshed_cube2.show()
+target_elems = 27
+print("Implicit mesh division, target_elems: ", target_elems)
+meshed_cube2 = mesh_Cuboid(cube, target_elems)
+magpy.show(*meshed_cube2)
 ```
 
-## Cylinder
+## Cylinder/CylinderSegment
 
 ```{code-cell} ipython3
 cyl = magpy.magnet.CylinderSegment(
     magnetization=(0, 0, 1000), dimension=(1, 2, 1, 0, 360)
 )
 cyl.move((0, 0, 0))
-# cyl.rotate_from_angax(45, "y")
+cyl.rotate_from_angax(45, "y", anchor=0)
 
-mesh = mesh_Cylinder(cyl, 50)
-mesh.set_children_styles(
-    magnetization_show=True,
-    magnetization_color_mode="bicolor",
-    magnetization_color_transition=0,
-)
 
 epsilon = 1e-5
-sens = magpy.Sensor().move(
-    np.linspace((-5, epsilon, epsilon), (5, epsilon, epsilon), 101), start=0
+sens = (
+    magpy.Sensor()
+    .move(np.linspace((-3, epsilon, epsilon), (3, epsilon, epsilon), 101), start=0)
+    .rotate_from_angax(45, "y", anchor=0)
 )
-fig = go.FigureWidget()
-magpy.show(mesh, canvas=fig)
-fig
-```
+target_elems = 50
+mesh1 = mesh_Cylinder(cyl, target_elems)
+print("Implicit mesh division, target_elems: ", target_elems)
+magpy.show(*mesh1, sens)
 
-```{code-cell} ipython3
-fig = go.FigureWidget()
-fig.add_scatter(y=sens.getB(cyl).T[2], name="B-field single")
-fig.add_scatter(y=sens.getB(mesh).T[2], name="B-field mesh")
+target_elems = (4, 1, 5)
+mesh2 = mesh_Cylinder(cyl, target_elems)
+print("Explicit mesh division, target_elems: ", target_elems)
+magpy.show(*mesh2, sens)
+
+fig = go.Figure(layout_title="Field over sensor path")
+fig.add_scatter(y=sens.getB(cyl).T[2], name="B-field (Full)")
+fig.add_scatter(y=sens.getB(mesh1).T[2], name="B-field (Meshed-1)")
+fig.add_scatter(y=sens.getB(mesh2).T[2], name="B-field (Meshed-2)")
 # fig.add_scatter(y=sens.getH(cyl).T[2], name='H-field single')
 # fig.add_scatter(y=sens.getH(mesh).T[2], name='H-field mesh')
 fig.show()
 ```
 
-# Mesh with cubes
+# Approximate meshing
+
+## Mesh with cubes
 
 ```{code-cell} ipython3
-obj = magpy.magnet.CylinderSegment((100, 200, 300), (10, 30, 50, 0, 360)).move(
+objs = [
+    magpy.magnet.CylinderSegment((100, 200, 300), (10, 30, 50, 0, 360)).move(
+        (2.2, 0, 0)
+    ),
+    magpy.magnet.Cuboid((1, 0, 0), (1, 1, 1)),
+    magpy.magnet.Cylinder((0, 0, 1), (1, 1)),
+    magpy.magnet.Sphere((0, 0, 1), 1),
+]
+for obj in objs:
+    obj.style.opacity=0.5
+    # obj.move([10,0,0]).rotate_from_angax(75, (1,5,6), anchor=0)
+    mesh1 = mesh_with_cubes(obj, 200, strict_inside=False)
+    mesh2 = mesh_with_cubes(obj, 200, strict_inside=True)
+
+    print(f"{obj._object_type} meshed ({len(mesh1)} cubes)")
+    magpy.show(obj, *mesh1)
+    print(f"{obj._object_type} stric-inside ({len(mesh2)} cubes)")
+    magpy.show(obj, *mesh2)
+```
+
+## Mesh thin cylinder segment with cuboids
+
+```{code-cell} ipython3
+cyl_seg = magpy.magnet.CylinderSegment((100, 200, 300), (29, 30, 50, 0, 360)).move(
     (2.2, 0, 0)
 )
-# obj = magpy.magnet.Cuboid((1, 0, 0), (1, 1, 1))
-# obj = magpy.magnet.Cylinder((0, 0, 1), (1, 1))
-# obj = magpy.magnet.Sphere((0, 0, 1), 1)
-
-# obj.move([10,0,0]).rotate_from_angax(75, (1,5,6), anchor=0)
-meshed_obj = mesh_with_cubes(obj, 1000, strict_inside=True)
-elems = len(meshed_obj)
-meshed_obj.style.label = f"{elems} cuboids"
-meshed_obj
 ```
 
 ```{code-cell} ipython3
-import plotly.graph_objects as go
+target_elems = (6, 1)
+print("Explicit mesh division, target_elems: ", target_elems)
+cyl_seg_mesh1 = mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems)
+magpy.show(*cyl_seg_mesh1)
 
-fig = go.Figure()
-magpy.show(
-    # obj,
-    meshed_obj,
-    canvas=fig,
-)
-fig
-```
-
-# Mesh thin cylinder segment with cuboids
-
-```{code-cell} ipython3
-obj = magpy.magnet.CylinderSegment((100, 200, 300), (29, 30, 50, 0, 360)).move(
-    (2.2, 0, 0)
-)
-meshed_obj = mesh_thin_CylinderSegment_with_cuboids(obj, (6, 1))
-meshed_obj.show()
+target_elems = 27
+print("Implicit mesh division, target_elems: ", target_elems)
+cyl_seg_mesh2 = mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems)
+magpy.show(*cyl_seg_mesh2)
 ```
