@@ -103,7 +103,7 @@ objs = [
     magpy.magnet.Sphere((0, 0, 1), 1),
 ]
 for obj in objs:
-    obj.style.opacity=0.5
+    obj.style.opacity = 0.5
     # obj.move([10,0,0]).rotate_from_angax(75, (1,5,6), anchor=0)
     mesh1 = mesh_with_cubes(obj, 200, strict_inside=False)
     mesh2 = mesh_with_cubes(obj, 200, strict_inside=True)
