@@ -1,11 +1,15 @@
 # +
 # pylint: disable=invalid-name, redefined-outer-name
 
+from time import perf_counter
+
 import magpylib as magpy
 import numpy as np
+from scipy.spatial.transform import Rotation as R
 
 
 # -
+
 
 def demag_tensor(src_list, store=False, load=False, verbose=False):
     """
@@ -53,24 +57,26 @@ def demag_tensor(src_list, store=False, load=False, verbose=False):
     if verbose:
         print(" - computing demagnetization tensor")
 
-    # compute cell positions
-    pos = np.empty((n, 3))
-    for i, src in enumerate(src_list):
-        if isinstance(src, magpy.magnet.CylinderSegment):
-            pos[i] = src.barycenter
-        else:
-            pos[i] = src.position
+    if verbose:
+        print("   - compute cell positions")
 
-    # split up magnetizations
-    coll3 = magpy.Collection()
+    pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+    rotQ0 = [src.orientation.as_quat() for src in src_list]
+    mag0 = [src.magnetization for src in src_list]
+
+    if verbose:
+        print("   - point matching field and demag tensor")
+    Hpoint = []
     for unit_mag in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
-        for src in src_list:
-            src.magnetization = src.orientation.inv().apply(unit_mag)  # ROTATION CHECK
-            coll3.add(src.copy())
+        mag_all = R.from_quat(rotQ0).inv().apply(unit_mag)  # ROTATION CHECK
+        for src, mag in zip(src_list, mag_all):
+            src.magnetization = mag  # _magnetization faster safe ?#
+        # point matching field and demag tensor
+        H = magpy.getH(src_list, pos0)
+        Hpoint.append(H)  # shape (n_cells, n_pos, 3_xyz)
 
-    # point matching field and demag tensor
-    Hpoint = magpy.getH(coll3.sources, pos)  # shape (3n cells, n pos, 3 xyz)
-    T = Hpoint.reshape(3, n, n, 3)  # shape (3 unit mag, n cells, n pos, 3 xyz)
+    # shape (3_unit_mag, n_cells, n_pos, 3_xyz)
+    T = np.array(Hpoint).reshape((3, n, n, 3))
 
     # store tensor
     if isinstance(store, str):
@@ -172,12 +178,19 @@ def apply_demag(
     S = np.diag(np.tile(xi, 3))  # shape ii, jj
 
     # set up T
+    start_time = perf_counter()
+    if verbose:
+        print(" - Start demagenization tensor calculation")
     T = demag_tensor(
         collection.sources_all,
         store=demag_store,
         load=demag_load,
         verbose=verbose,
     )  # shape (3 mag unit, n cells, n positions, 3 Bxyz)
+    if verbose:
+        print(
+            f" - Finished demagnetization tensor calculation in {round(perf_counter()- start_time, 3)}sec"
+        )
     # T = T.swapaxes(0, 3)
     T = T * (4 * np.pi / 10)
     T = T.swapaxes(2, 3)

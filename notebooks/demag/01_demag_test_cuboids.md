@@ -13,6 +13,11 @@ kernelspec:
 ---
 
 ```{code-cell} ipython3
+%load_ext autoreload
+%autoreload 2
+```
+
+```{code-cell} ipython3
 import magpylib as magpy
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,7 +25,7 @@ from demag_functions import apply_demag
 from meshing_functions import mesh_Cuboid
 
 # number of target mesh elements
-target_cells = 150
+target_cells = 200
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
@@ -50,8 +55,10 @@ sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 B0 = sensor.getB(COLL)
 
 # apply demag
-apply_demag(COLL, xi_vector)
+apply_demag(COLL, xi_vector, verbose=True)
+```
 
+```{code-cell} ipython3
 # compute field after demag
 B1 = sensor.getB(COLL)
 
