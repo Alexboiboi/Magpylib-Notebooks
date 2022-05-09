@@ -134,7 +134,3 @@ fig = px.line(
 )
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
-
-```{code-cell} ipython3
-
-```

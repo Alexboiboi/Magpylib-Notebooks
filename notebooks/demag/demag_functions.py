@@ -1,17 +1,36 @@
+"""demag_functions"""
 # +
-# pylint: disable=invalid-name, redefined-outer-name
+# pylint: disable=invalid-name, redefined-outer-name, protected-access
 
+import sys
 from time import perf_counter
+from collections import Counter
 
-import magpylib as magpy
+from loguru import logger
 import numpy as np
 from scipy.spatial.transform import Rotation as R
+import magpylib as magpy
 
+config = {
+    "handlers": [
+        dict(
+            sink=sys.stdout,
+            colorize=True,
+            format=(
+                "<magenta>{time:YYYY-MM-DD at HH:mm:ss}</magenta>"
+                " | <level>{level:^8}</level>"
+                " | <cyan>{function}</cyan>"
+                " | <yellow>{extra}</yellow> {level.icon:<2} {message}"
+            ),
+        ),
+    ],
+}
+logger.configure(**config)
 
 # -
 
 
-def demag_tensor(src_list, store=False, load=False, verbose=False):
+def demag_tensor(src_list, store=False, load=False, pairs_matching=False, split=False):
     """
     Compute the demagnetization tensor T based on point matching (see Chadbec 2006)
     for n sources in the input collection.
@@ -27,8 +46,13 @@ def demag_tensor(src_list, store=False, load=False, verbose=False):
     load: `False` or filename (str)
         Try to load T from filename.npy.
 
-    verbose: bool
-        If True, prints out demagnetization process informations
+    pairs_matching: bool
+        If True, equivalent pair of interactions are identified and unique pairs are
+        calculated only once and copied to duplicates.
+
+    split: int
+        Number of times the sources list is splitted before getH calculation ind demag
+        tensor calculation
 
     Returns
     -------
@@ -42,53 +66,115 @@ def demag_tensor(src_list, store=False, load=False, verbose=False):
     TODO: Use newell formulas for cube-cube interactions
     """
     n = len(src_list)
-
     # load pre-computed tensor
     if isinstance(load, str):
         T = np.load(load + ".npy")
-        if verbose:
-            print(" - load pre-computed demagnetization tensor")
+        logger.info("load pre-computed demagnetization tensor")
         if n != T.shape[1]:
             raise ValueError(
                 "Loaded demag tensor is not of same shape as input collection"
             )
         return T
 
-    if verbose:
-        print(" - computing demagnetization tensor")
+    if pairs_matching and split != 1:
+        raise ValueError("Pairs matching does not support splitting")
+    elif pairs_matching:
+        getH_params, unique_inds, unique_inv_inds, rot0 = match_pairs(src_list)
+    else:
+        pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+        rotQ0 = [src.orientation.as_quat() for src in src_list]
+        rot0 = R.from_quat(rotQ0)
 
-    if verbose:
-        print("   - compute cell positions")
-
-    pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
-    rotQ0 = [src.orientation.as_quat() for src in src_list]
-    mag0 = [src.magnetization for src in src_list]
-
-    if verbose:
-        print("   - point matching field and demag tensor")
-    Hpoint = []
+    H_point = []
     for unit_mag in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
-        mag_all = R.from_quat(rotQ0).inv().apply(unit_mag)  # ROTATION CHECK
-        for src, mag in zip(src_list, mag_all):
-            src.magnetization = mag  # _magnetization faster safe ?#
+        mag_all = rot0.inv().apply(unit_mag)
         # point matching field and demag tensor
-        H = magpy.getH(src_list, pos0)
-        Hpoint.append(H)  # shape (n_cells, n_pos, 3_xyz)
+        getH_time = perf_counter()
+        if pairs_matching:
+            magnetization = np.repeat(mag_all, len(src_list), axis=0)[unique_inds]
+            H_unique = magpy.getH("Cuboid", magnetization=magnetization, **getH_params)
+            H_unit_mag = H_unique[unique_inv_inds]
+        else:
+            for src, mag in zip(src_list, mag_all):
+                src.magnetization = mag
+            if split > 1:
+                src_list_split = np.array_split(src_list, split)
+                with logger.contextualize(task="Splitting field calculation", split=split):
+                    H_unit_mag = []
+                    for split_ind, src_list_subset in enumerate(src_list_split):
+                        logger.info(f"Sources subset {split_ind+1}/{len(src_list_split)}")
+                        if src_list_subset.size > 0:
+                            H_unit_mag.append(magpy.getH(src_list_subset.tolist(), pos0))
+                    H_unit_mag = np.concatenate(H_unit_mag, axis=0)
+            else:
+                for src, mag in zip(src_list, mag_all):
+                    src.magnetization = mag
+                H_unit_mag = magpy.getH(src_list, pos0)
+        H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
+        logger.info(
+            f"getH with unit_mag= {unit_mag} done"
+            f" 🕑 {round(perf_counter()-getH_time, 3)}sec"
+        )
 
     # shape (3_unit_mag, n_cells, n_pos, 3_xyz)
-    T = np.array(Hpoint).reshape((3, n, n, 3))
+    T = np.array(H_point).reshape((3, n, n, 3))
 
     # store tensor
     if isinstance(store, str):
         fn = store + ".npy"
-        if verbose:
-            print(f"Saving demagnetization tensor to {fn}")
+        logger.success(f"Saved demagnetization tensor to {fn}")
         np.save(fn, T)
 
     return T
 
 
-def invert(matrix, solver, verbose=False):
+def match_pairs(src_list):
+    """match all pairs of sources from `src_list`"""
+    all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+    if not all_cuboids:
+        raise ValueError("Pairs matching only implemented if all sources are Cuboids")
+    pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+    rotQ0 = [src.orientation.as_quat() for src in src_list]
+    rot0 = R.from_quat(rotQ0)
+    mag0 = [src.magnetization for src in src_list]
+    dim0 = [src.dimension for src in src_list]
+
+    # num_of_pairs = len(src_list) ** 2
+    with logger.contextualize(task="Find duplicate interactions"):
+        logger.info("Find duplicate interactions")
+        logger.info("position")
+        pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
+        logger.info("orientation")
+        rot0Q1 = np.tile(rotQ0, (len(rotQ0), 1))
+        rot0Q2 = np.repeat(rotQ0, len(rotQ0), axis=0)
+        # checking relative orientation is very expensive, often not worth the savings
+        # rot2 = (R.from_quat(rot0Q1) * R.from_quat(rot0Q2)) \
+        #    .as_matrix().reshape((num_of_pairs, -1))
+        rot2 = rot0Q1 - rot0Q2  # only checks if quat vals are same
+        logger.info("dimension")
+        dim2 = np.tile(dim0, (len(dim0), 1)) - np.repeat(dim0, len(dim0), axis=0)
+        logger.info("magnetization")
+        mag2 = np.tile(mag0, (len(mag0), 1)) - np.repeat(mag0, len(mag0), axis=0)
+        logger.info("concatenate properties")
+        prop = (np.concatenate([pos2, rot2, dim2, mag2], axis=1) + 1e-9).round(8)
+        logger.info("find unique indices")
+        _, unique_inds, unique_inv_inds = np.unique(
+            prop, return_index=True, return_inverse=True, axis=0
+        )
+        logger.info(
+            f"Pair matching savings: {len(unique_inds) / len(unique_inv_inds)*100:.2f}%"
+        )
+
+    params = dict(
+        observers=np.tile(pos0, (len(src_list), 1))[unique_inds],
+        position=np.repeat(pos0, len(src_list), axis=0)[unique_inds],
+        orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[unique_inds],
+        dimension=np.repeat(dim0, len(src_list), axis=0)[unique_inds],
+    )
+    return params, unique_inds, unique_inv_inds, rot0
+
+
+def invert(matrix, solver):
     """
     Matrix inversion
 
@@ -100,9 +186,6 @@ def invert(matrix, solver, verbose=False):
     solver: str
         Solver to be used. Must be one of (np.linalg.inv, ).
 
-    verbose: bool
-        If True, prints out process informations
-
     Returns
     -------
     matrix_inverse: ndarray, shape (n,n)
@@ -111,11 +194,16 @@ def invert(matrix, solver, verbose=False):
     TODO implement and test different solver packages
     TODO check input matrix and auto-select correct solver (direct, iterative, ...)
     """
-    if verbose:
-        print(" - solving with " + solver)
+    matrix_inv_start_time = perf_counter()
+    logger.info("Start solving with " + solver)
 
     if solver == "np.linalg.inv":
-        return np.linalg.inv(matrix)
+        res = np.linalg.inv(matrix)
+        logger.success(
+            f"Matrix inversion done"
+            f" 🕑 {round(perf_counter()- matrix_inv_start_time, 3)}sec"
+        )
+        return res
 
     raise ValueError("Bad solver input.")
 
@@ -127,7 +215,8 @@ def apply_demag(
     demag_store=False,
     demag_load=False,
     inplace=True,
-    verbose=False,
+    pairs_matching=False,
+    split=1,
 ):
     """
     Computes the interaction between all collection magnets and fixes their magnetization.
@@ -149,23 +238,37 @@ def apply_demag(
     demag_load: `False` or filename (str)
         Try to load demagnetization tensor T from filename.npy.
 
-    verbose: bool
-        If True, prints out demagnetization process informations
+    inplace: bool
+        If True, applies demagnetization on a copy of the input collection and returns the
+        demagnetized collection
+
+    pairs_matching: bool
+        If True, equivalent pair of interactions are identified and unique pairs are
+        calculated only once and copied to duplicates.
+
+    split: int
+        Number of times the sources list is splitted before getH calculation ind demag
+        tensor calculation
 
     Returns
     -------
     None
     """
+    demag_start_time = perf_counter()
     if not inplace:
         collection = collection.copy()
-    n = len(collection.sources_all)
 
-    if verbose:
-        print(f"Starting demag computation with {n} cells.")
+    src_list = collection.sources_all
+    n = len(src_list)
+    counts = Counter(s._object_type for s in src_list)
+    logger.info(
+        f"Start demagnetization computation with {n} cells - {counts}"
+        f""" {"(inplace)" if inplace else ""}"""
+    )
 
     # set up mr
     mag = [
-        src.orientation.apply(src.magnetization) for src in collection.sources_all
+        src.orientation.apply(src.magnetization) for src in src_list
     ]  # ROTATION CHECK
     mag = np.reshape(
         mag, (3 * n, 1), order="F"
@@ -177,20 +280,20 @@ def apply_demag(
         raise ValueError("Apply_demag input collection and xi must have same length.")
     S = np.diag(np.tile(xi, 3))  # shape ii, jj
 
-    # set up T
-    start_time = perf_counter()
-    if verbose:
-        print(" - Start demagenization tensor calculation")
+    # set up T (3 mag unit, n cells, n positions, 3 Bxyz)
+    demag_tensor_start_time = perf_counter()
+    logger.info("Start demagnetization tensor calculation")
     T = demag_tensor(
-        collection.sources_all,
+        src_list,
         store=demag_store,
         load=demag_load,
-        verbose=verbose,
-    )  # shape (3 mag unit, n cells, n positions, 3 Bxyz)
-    if verbose:
-        print(
-            f" - Finished demagnetization tensor calculation in {round(perf_counter()- start_time, 3)}sec"
-        )
+        split=split,
+        pairs_matching=pairs_matching,
+    )
+    logger.success(
+        f"Demagnetization tensor calculation done"
+        f" 🕑 {round(perf_counter()- demag_tensor_start_time, 3)}sec"
+    )
     # T = T.swapaxes(0, 3)
     T = T * (4 * np.pi / 10)
     T = T.swapaxes(2, 3)
@@ -198,7 +301,7 @@ def apply_demag(
 
     # set up and invert Q
     Q = np.eye(3 * n) - np.matmul(S, T)
-    Q_inv = invert(matrix=Q, solver=solver, verbose=verbose)
+    Q_inv = invert(matrix=Q, solver=solver)
 
     # determine new magnetization vectors
     mag_new = np.matmul(Q_inv, mag)
@@ -208,7 +311,9 @@ def apply_demag(
     for s, mag in zip(collection.sources_all, mag_new):
         s.magnetization = s.orientation.inv().apply(mag)  # ROTATION CHECK
 
-    if verbose:
-        print("Demag computation completed.")
+    logger.success(
+        f"Demagnetization computation done"
+        f" 🕑 {round(perf_counter()- demag_start_time, 3)}sec"
+    )
     if not inplace:
         return collection

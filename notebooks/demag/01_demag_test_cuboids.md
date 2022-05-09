@@ -25,7 +25,7 @@ from demag_functions import apply_demag
 from meshing_functions import mesh_Cuboid
 
 # number of target mesh elements
-target_cells = 200
+target_cells = 150
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
@@ -55,7 +55,9 @@ sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 B0 = sensor.getB(COLL)
 
 # apply demag
-apply_demag(COLL, xi_vector, verbose=True)
+# apply_demag(COLL, xi_vector, pairs_matching=False, split=1)
+apply_demag(COLL, xi_vector, pairs_matching=False, split=20)
+# apply_demag(COLL, xi_vector, pairs_matching=True, split=1)
 ```
 
 ```{code-cell} ipython3
@@ -70,7 +72,7 @@ FEMdata = np.genfromtxt(
 fig = plt.figure(figsize=(14, 6))
 ax1 = fig.add_subplot(121, projection="3d")
 ax2 = fig.add_subplot(122)
-ax1.set_box_aspect(aspect = (1,1,1))
+ax1.set_box_aspect(aspect=(1, 1, 1))
 magpy.show(coll1, coll2, coll3, sensor, canvas=ax1)
 
 # plot field from FE computation
