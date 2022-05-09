@@ -30,7 +30,9 @@ logger.configure(**config)
 # -
 
 
-def demag_tensor(src_list, store=False, load=False, pairs_matching=False, split=False):
+def demag_tensor(
+    src_list, store=False, load=False, pairs_matching=False, split=False, max_dist=0
+):
     """
     Compute the demagnetization tensor T based on point matching (see Chadbec 2006)
     for n sources in the input collection.
@@ -78,8 +80,10 @@ def demag_tensor(src_list, store=False, load=False, pairs_matching=False, split=
 
     if pairs_matching and split != 1:
         raise ValueError("Pairs matching does not support splitting")
+    elif max_dist != 0:
+        getH_params, mask_inds, rot0 = filter_distance(src_list, max_dist)
     elif pairs_matching:
-        getH_params, unique_inds, unique_inv_inds, rot0 = match_pairs(src_list)
+        getH_params, mask_inds, unique_inv_inds, rot0 = match_pairs(src_list)
     else:
         pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
         rotQ0 = [src.orientation.as_quat() for src in src_list]
@@ -90,25 +94,34 @@ def demag_tensor(src_list, store=False, load=False, pairs_matching=False, split=
         mag_all = rot0.inv().apply(unit_mag)
         # point matching field and demag tensor
         getH_time = perf_counter()
-        if pairs_matching:
-            magnetization = np.repeat(mag_all, len(src_list), axis=0)[unique_inds]
+        if pairs_matching or max_dist != 0:
+            magnetization = np.repeat(mag_all, len(src_list), axis=0)[mask_inds]
             H_unique = magpy.getH("Cuboid", magnetization=magnetization, **getH_params)
-            H_unit_mag = H_unique[unique_inv_inds]
+            if max_dist != 0:
+                H_temp = np.zeros((len(src_list) ** 2, 3))
+                H_temp[mask_inds] = H_unique
+                H_unit_mag = H_temp
+            else:
+                H_unit_mag = H_unique[unique_inv_inds]
         else:
             for src, mag in zip(src_list, mag_all):
                 src.magnetization = mag
             if split > 1:
                 src_list_split = np.array_split(src_list, split)
-                with logger.contextualize(task="Splitting field calculation", split=split):
+                with logger.contextualize(
+                    task="Splitting field calculation", split=split
+                ):
                     H_unit_mag = []
                     for split_ind, src_list_subset in enumerate(src_list_split):
-                        logger.info(f"Sources subset {split_ind+1}/{len(src_list_split)}")
+                        logger.info(
+                            f"Sources subset {split_ind+1}/{len(src_list_split)}"
+                        )
                         if src_list_subset.size > 0:
-                            H_unit_mag.append(magpy.getH(src_list_subset.tolist(), pos0))
+                            H_unit_mag.append(
+                                magpy.getH(src_list_subset.tolist(), pos0)
+                            )
                     H_unit_mag = np.concatenate(H_unit_mag, axis=0)
             else:
-                for src, mag in zip(src_list, mag_all):
-                    src.magnetization = mag
                 H_unit_mag = magpy.getH(src_list, pos0)
         H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
         logger.info(
@@ -128,6 +141,34 @@ def demag_tensor(src_list, store=False, load=False, pairs_matching=False, split=
     return T
 
 
+def filter_distance(src_list, max_dist):
+    """filter indices by distance parameter"""
+    all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+    if not all_cuboids:
+        raise ValueError("filter_distance only implemented if all sources are Cuboids")
+    pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+    rotQ0 = [src.orientation.as_quat() for src in src_list]
+    rot0 = R.from_quat(rotQ0)
+    pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
+    dist2 = np.linalg.norm(pos2, axis=1)
+    dim0 = [src.dimension for src in src_list]
+    dim2 = np.tile(dim0, (len(dim0), 1)), np.repeat(dim0, len(dim0), axis=0)
+    maxdim2 = np.concatenate(dim2, axis=1).max(axis=1)
+    mask = (dist2 / maxdim2) < max_dist
+    params = dict(
+        observers=np.tile(pos0, (len(src_list), 1))[mask],
+        position=np.repeat(pos0, len(src_list), axis=0)[mask],
+        orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
+        dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
+    )
+    dsf = sum(~mask) / len(mask)*100
+    if dsf == 0:
+        logger.warning(f"Distance factor savings: {dsf:.2f}%")
+    else:
+        logger.info(f"Distance factor savings: {dsf:.2f}%")
+    return params, mask, rot0
+
+
 def match_pairs(src_list):
     """match all pairs of sources from `src_list`"""
     all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
@@ -139,7 +180,7 @@ def match_pairs(src_list):
     mag0 = [src.magnetization for src in src_list]
     dim0 = [src.dimension for src in src_list]
 
-    # num_of_pairs = len(src_list) ** 2
+    num_of_pairs = len(src_list) ** 2
     with logger.contextualize(task="Find duplicate interactions"):
         logger.info("Find duplicate interactions")
         logger.info("position")
@@ -148,9 +189,11 @@ def match_pairs(src_list):
         rot0Q1 = np.tile(rotQ0, (len(rotQ0), 1))
         rot0Q2 = np.repeat(rotQ0, len(rotQ0), axis=0)
         # checking relative orientation is very expensive, often not worth the savings
-        # rot2 = (R.from_quat(rot0Q1) * R.from_quat(rot0Q2)) \
-        #    .as_matrix().reshape((num_of_pairs, -1))
-        rot2 = rot0Q1 - rot0Q2  # only checks if quat vals are same
+        rot2 = (
+            (R.from_quat(rot0Q1) * R.from_quat(rot0Q2))
+            .as_matrix()
+            .reshape((num_of_pairs, -1))
+        )
         logger.info("dimension")
         dim2 = np.tile(dim0, (len(dim0), 1)) - np.repeat(dim0, len(dim0), axis=0)
         logger.info("magnetization")
@@ -216,7 +259,9 @@ def apply_demag(
     demag_load=False,
     inplace=True,
     pairs_matching=False,
+    max_dist=0,
     split=1,
+    style=None,
 ):
     """
     Computes the interaction between all collection magnets and fixes their magnetization.
@@ -244,11 +289,21 @@ def apply_demag(
 
     pairs_matching: bool
         If True, equivalent pair of interactions are identified and unique pairs are
-        calculated only once and copied to duplicates.
+        calculated only once and copied to duplicates. This parameter is not compatible with
+        `max_dist` or `split` and applies only cuboid cells.
+
+    max_dist: float
+        Posivive number representing the max_dimension to distance ratio for each pair of
+        interacting cells. This filters out far interactions. If `max_dist=0`, all interactions are
+        calculated. This parameter is not compatible with `pairs_matching` or `split` and applies
+        only cuboid cells.
 
     split: int
         Number of times the sources list is splitted before getH calculation ind demag
-        tensor calculation
+        tensor calculation. This parameter is not compatible with `pairs_matching` or `max_dist`.
+
+    style: dict
+        Set collection style. If `inplace=False` only affects the copied collection
 
     Returns
     -------
@@ -289,6 +344,7 @@ def apply_demag(
         load=demag_load,
         split=split,
         pairs_matching=pairs_matching,
+        max_dist=max_dist,
     )
     logger.success(
         f"Demagnetization tensor calculation done"
@@ -315,5 +371,7 @@ def apply_demag(
         f"Demagnetization computation done"
         f" 🕑 {round(perf_counter()- demag_start_time, 3)}sec"
     )
+    if style is not None:
+        collection.style = style
     if not inplace:
         return collection

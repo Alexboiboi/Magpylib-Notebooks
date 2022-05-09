@@ -21,11 +21,15 @@ kernelspec:
 import magpylib as magpy
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 from demag_functions import apply_demag
 from meshing_functions import mesh_Cuboid
+import plotly.express as px
+
+magpy.defaults.display.backend = "plotly"
 
 # number of target mesh elements
-target_cells = 150
+target_cells = 200
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
@@ -45,59 +49,126 @@ coll3.move((1.6, 0, 0.5)).rotate_from_angax(30, "z")
 xi3 = [0.5] * len(coll3)  # mu3=1.5
 
 # collection of all cells
-COLL = magpy.Collection(coll1, coll2, coll3)
+COLL0 = magpy.Collection(coll1, coll2, coll3)
 xi_vector = np.array(xi1 + xi2 + xi3)
 
 # sensor
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 
 # compute field before demag
-B0 = sensor.getB(COLL)
-
-# apply demag
-# apply_demag(COLL, xi_vector, pairs_matching=False, split=1)
-apply_demag(COLL, xi_vector, pairs_matching=False, split=20)
-# apply_demag(COLL, xi_vector, pairs_matching=True, split=1)
+B0 = sensor.getB(COLL0)
 ```
 
 ```{code-cell} ipython3
-# compute field after demag
-B1 = sensor.getB(COLL)
-
-# load ANSYS FEM data
-FEMdata = np.genfromtxt(
-    "FEMdata_test_cuboids.csv", delimiter=",", skip_header=1, skip_footer=0
-).T
-
-fig = plt.figure(figsize=(14, 6))
-ax1 = fig.add_subplot(121, projection="3d")
-ax2 = fig.add_subplot(122)
-ax1.set_box_aspect(aspect=(1, 1, 1))
-magpy.show(coll1, coll2, coll3, sensor, canvas=ax1)
-
-# plot field from FE computation
-ax2.plot(FEMdata[1] * 1000, color="k", label="FEM (ANSYS)")
-ax2.plot(FEMdata[2] * 1000, color="k")
-ax2.plot(FEMdata[3] * 1000, color="k")
-
-# plot field without demag
-ax2.plot(B0[:, 0], "y", ls=":", label="Bx magpy - no interaction")
-ax2.plot(B0[:, 1], "m", ls=":", label="By magpy - no interaction")
-ax2.plot(B0[:, 2], "c", ls=":", label="Bz magpy - no interaction")
-
-# plot field with demag
-ncells = len(COLL.sources_all)
-ax2.plot(B1[:, 0], "y", ls="--", label=f"Bx magpy - {ncells} cells interaction")
-ax2.plot(B1[:, 1], "m", ls="--", label=f"By magpy - {ncells} cells interaction")
-ax2.plot(B1[:, 2], "c", ls="--", label=f"Bz magpy - {ncells} cells interaction")
-
-ax2.set(
-    title="B-field at sensor line [mT]",
-    xlabel="position on line [mm]",
+# apply demag
+colls = [COLL0.copy(style_label='No Demag')]
+colls.append(apply_demag(COLL0, xi_vector, inplace=False, style={"label":"Full demag"}))
+# colls.append(
+#     apply_demag(
+#         COLL0,
+#         xi_vector,
+#         inplace=False,
+#         split=20,
+#         style={"label":"Full demag with splitting (=20)"},
+#     )
+# )
+colls.append(
+    apply_demag(
+        COLL0,
+        xi_vector,
+        inplace=False,
+        pairs_matching=True,
+        style={"label":"Pairs matching"},
+    )
 )
-ax2.grid(color=".9")
-ax2.legend()
+for max_dist in [2,3,5,10,20]:
+    colls.append(
+        apply_demag(
+            COLL0,
+            xi_vector,
+            inplace=False,
+            max_dist=max_dist,
+            style={"label":f"Max distance matching (={max_dist:02d})"},
+        )
+    )
+```
 
-plt.tight_layout()
-plt.show()
+```{code-cell} ipython3
+B_cols = ["Bx [mT]", "By [mT]", "Bz [mT]"]
+
+
+def read_FEM_data(file, source_type):
+    df = pd.read_csv(file, delimiter=",")
+    df.columns = ["Distance [mm]"] + B_cols
+    df = df[["Distance [mm]"] + B_cols]
+    df[B_cols] *= 1000
+    df[["Distance [mm]"]] -= 4
+    df["Source_type"] = source_type
+    return df
+
+
+def get_magpylib_data(collection, sensor):
+    B0 = collection.getB(sensor)
+    df = pd.DataFrame(
+        data=B0,
+        columns=B_cols,
+    )
+    df["Distance [mm]"] = sensor.position[:, 0]
+    df["Source_type"] = collection.style.label
+    return df
+
+
+df = pd.concat(
+    [
+        read_FEM_data("FEMdata_test_cuboids.csv", "FEM (ANSYS)"),
+        *[get_magpylib_data(coll, sensor) for coll in colls],
+    ]
+)
+df
+```
+
+```{code-cell} ipython3
+colls[0].show()
+```
+
+```{code-cell} ipython3
+fig = px.line(
+    df,
+    x="Distance [mm]",
+    y=B_cols,
+    facet_col="variable",
+    color="Source_type",
+    line_dash="Source_type",
+    #height=600,
+    title="FEM vs Magpylib vs Magpylib+Demag",
+    facet_col_spacing=0.05,
+)
+fig.update_yaxes(matches=None, showticklabels=True)
+```
+
+```{code-cell} ipython3
+dff = df.sort_values(["Source_type", "Distance [mm]"])
+ref = "Full demag"
+for st in dff["Source_type"].unique():
+    dff.loc[dff["Source_type"] == st, B_cols] -= df.loc[
+        df["Source_type"] == ref, B_cols
+    ].values
+
+
+fig = px.line(
+    dff,
+    x="Distance [mm]",
+    y=B_cols,
+    facet_col="variable",
+    color="Source_type",
+    line_dash="Source_type",
+    #height=600,
+    title=f"FEM vs Magpylib vs Magpylib+Demag (diff vs {ref})",
+    facet_col_spacing=0.05,
+)
+fig.update_yaxes(matches=None, showticklabels=True)
+```
+
+```{code-cell} ipython3
+
 ```
