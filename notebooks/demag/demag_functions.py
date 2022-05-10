@@ -124,9 +124,9 @@ def demag_tensor(
             else:
                 H_unit_mag = magpy.getH(src_list, pos0)
         H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
-        logger.info(
-            f"getH with unit_mag= {unit_mag} done"
-            f" 🕑 {round(perf_counter()-getH_time, 3)}sec"
+        logger.opt(colors=True).success(
+            f"getH with unit_mag={unit_mag} done"
+            f"<green> 🕑 {round(perf_counter()-getH_time, 3)}sec</green>"
         )
 
     # shape (3_unit_mag, n_cells, n_pos, 3_xyz)
@@ -143,6 +143,7 @@ def demag_tensor(
 
 def filter_distance(src_list, max_dist):
     """filter indices by distance parameter"""
+    filter_distance_time = perf_counter()
     all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
     if not all_cuboids:
         raise ValueError("filter_distance only implemented if all sources are Cuboids")
@@ -161,16 +162,21 @@ def filter_distance(src_list, max_dist):
         orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
         dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
     )
-    dsf = sum(~mask) / len(mask)*100
+    dsf = sum(~mask) / len(mask) * 100
+    log_msg = (
+        f"Distance factor savings: {dsf:.2f}%"
+        f"<green> 🕑 {round(perf_counter()-filter_distance_time, 3)}sec</green>"
+    )
     if dsf == 0:
-        logger.warning(f"Distance factor savings: {dsf:.2f}%")
+        logger.opt(colors=True).warning(log_msg)
     else:
-        logger.info(f"Distance factor savings: {dsf:.2f}%")
+        logger.opt(colors=True).success(log_msg)
     return params, mask, rot0
 
 
 def match_pairs(src_list):
     """match all pairs of sources from `src_list`"""
+    match_pairs_time = perf_counter()
     all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
     if not all_cuboids:
         raise ValueError("Pairs matching only implemented if all sources are Cuboids")
@@ -203,8 +209,9 @@ def match_pairs(src_list):
         _, unique_inds, unique_inv_inds = np.unique(
             prop, return_index=True, return_inverse=True, axis=0
         )
-        logger.info(
+        logger.opt(colors=True).success(
             f"Pair matching savings: {len(unique_inds) / len(unique_inv_inds)*100:.2f}%"
+            f"<green> 🕑 {round(perf_counter()-match_pairs_time, 3)}sec</green>"
         )
 
     params = dict(
@@ -241,9 +248,9 @@ def invert(matrix, solver):
 
     if solver == "np.linalg.inv":
         res = np.linalg.inv(matrix)
-        logger.success(
+        logger.opt(colors=True).success(
             f"Matrix inversion done"
-            f" 🕑 {round(perf_counter()- matrix_inv_start_time, 3)}sec"
+            f"<green> 🕑 {round(perf_counter()- matrix_inv_start_time, 3)}sec</green>"
         )
         return res
 
@@ -311,12 +318,14 @@ def apply_demag(
     demag_start_time = perf_counter()
     if not inplace:
         collection = collection.copy()
+    if style is not None:
+        collection.style = style
 
     src_list = collection.sources_all
     n = len(src_list)
     counts = Counter(s._object_type for s in src_list)
-    logger.info(
-        f"Start demagnetization computation with {n} cells - {counts}"
+    logger.opt(colors=True).info(
+        f"Start demagnetization computation of <blue>{collection}</blue> with {n} cells - {counts}"
         f""" {"(inplace)" if inplace else ""}"""
     )
 
@@ -345,9 +354,9 @@ def apply_demag(
         pairs_matching=pairs_matching,
         max_dist=max_dist,
     )
-    logger.success(
+    logger.opt(colors=True).success(
         f"Demagnetization tensor calculation done"
-        f" 🕑 {round(perf_counter()- demag_tensor_start_time, 3)}sec"
+        f"<green> 🕑 {round(perf_counter()- demag_tensor_start_time, 3)}sec</green>"
     )
     # T = T.swapaxes(0, 3)
     T = T * (4 * np.pi / 10)
@@ -366,11 +375,9 @@ def apply_demag(
     for s, mag in zip(collection.sources_all, mag_new):
         s.magnetization = s.orientation.inv().apply(mag)  # ROTATION CHECK
 
-    logger.success(
+    logger.opt(colors=True).success(
         f"Demagnetization computation done"
-        f" 🕑 {round(perf_counter()- demag_start_time, 3)}sec"
+        f"<green> 🕑 {round(perf_counter()- demag_start_time, 3)}sec</green>"
     )
-    if style is not None:
-        collection.style = style
     if not inplace:
         return collection
