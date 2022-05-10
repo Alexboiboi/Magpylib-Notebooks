@@ -181,8 +181,7 @@ def match_pairs(src_list):
     dim0 = [src.dimension for src in src_list]
 
     num_of_pairs = len(src_list) ** 2
-    with logger.contextualize(task="Find duplicate interactions"):
-        logger.info("Find duplicate interactions")
+    with logger.contextualize(task="Match interactions pairs"):
         logger.info("position")
         pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
         logger.info("orientation")
