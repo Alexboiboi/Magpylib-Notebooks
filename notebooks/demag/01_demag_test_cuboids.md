@@ -18,18 +18,20 @@ kernelspec:
 ```
 
 ```{code-cell} ipython3
+import ipywidgets as widgets
 import magpylib as magpy
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from demag_functions import apply_demag
-from meshing_functions import mesh_Cuboid
 import plotly.express as px
+import plotly.graph_objects as go
+from demag_functions import apply_demag, match_pairs
+from meshing_functions import mesh_Cuboid
 
 magpy.defaults.display.backend = "plotly"
 
 # number of target mesh elements
-target_cells = 200
+target_cells = 20
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
@@ -60,9 +62,110 @@ B0 = sensor.getB(COLL0)
 ```
 
 ```{code-cell} ipython3
+coll = COLL0
+src_list = coll.sources_all
+from scipy.spatial.transform import Rotation as R
+
+num_of_src = len(src_list)
+pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+rotQ0 = [src.orientation.as_quat() for src in src_list]
+rot0 = R.from_quat(rotQ0)
+mag0 = [src.magnetization for src in src_list]
+dim0 = [src.dimension for src in src_list]
+
+num_of_pairs = len(src_list) ** 2
+pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
+rot0Q1 = np.tile(rotQ0, (len(rotQ0), 1))
+rot0Q2 = np.repeat(rotQ0, len(rotQ0), axis=0)
+# checking relative orientation is very expensive, often not worth the savings
+rot2 = (
+    (R.from_quat(rot0Q1) * R.from_quat(rot0Q2)).as_matrix().reshape((num_of_pairs, -1))
+)
+dim2 = np.tile(dim0, (len(dim0), 1)) - np.repeat(dim0, len(dim0), axis=0)
+mag2 = np.tile(mag0, (len(mag0), 1)) - np.repeat(mag0, len(mag0), axis=0)
+prop = (np.concatenate([pos2, rot2, dim2, mag2], axis=1) + 1e-9).round(8)
+uniq, unique_inds, unique_inv_inds = np.unique(
+    pos2, return_index=True, return_inverse=True, axis=0
+)
+```
+
+```{code-cell} ipython3
+bary2 = np.concatenate(
+    [np.tile(pos0, (len(pos0), 1)), np.repeat(pos0, len(pos0), axis=0)], axis=1
+).reshape((-1, 2, 3))
+
+
+fig = go.FigureWidget()
+magpy.show(coll, canvas=fig, style_opacity=0.1)
+fig.add_scatter3d()
+inds = unique_inds[unique_inv_inds]
+uniq, counts = np.unique(inds, return_counts=True)
+
+
+def update_fig(group_index):
+    count = counts[group_index]
+    ind = uniq[group_index]
+    pos4 = bary2[inds == ind]
+    path = np.empty((len(pos4) * 3, 3))
+    path[::3] = pos4[:, 0, :]
+    path[1::3] = pos4[:, 1, :]
+    path[2::3] = None
+    trace = dict(
+        x=path[:, 0],
+        y=path[:, 1],
+        z=path[:, 2],
+        mode="lines+markers",
+        line_color=np.repeat(range(count), 3),
+        marker_color=np.repeat(range(count), 3),
+        name=f"Group_{group_index:03d} ({count} matching interactions)",
+    )
+    fig.data[1].update(**trace)
+
+
+def update_dropdown(tresh):
+    c = counts
+    opts = [
+        (f"Group_{i:03d} ({c[i]} matching interactions)", i)
+        for i, _ in enumerate(c)
+        if c[i] >= tresh[0] and c[i] <= tresh[1]
+    ]
+    dropdown.options = opts
+
+
+dropdown = widgets.Dropdown(description="Group index", style=dict(description_width="auto"))
+update_dropdown([3, max(counts)])
+thresh_widget = widgets.IntRangeSlider(
+    min=2, max=max(counts), description="Counts threshold", style=dict(description_width="auto")
+)
+widgets.interactive(update_fig, group_index=dropdown)
+widgets.interactive(update_dropdown, tresh=thresh_widget)
+
+widgets.HBox([widgets.VBox([dropdown, thresh_widget]), fig])
+```
+
+```{raw-cell}
+a = ["c", "a", "b", "c"]
+
+u, i, v, c = np.unique(
+    a, return_index=True, return_inverse=True, return_counts=True, axis=0
+)
+display(
+    f"original: {a}",
+    f"unique: {u}",
+    f"index: {i}",
+    f"inverse: {v}",
+    f"counts: {c}",
+    f"index[inverse] {i[v]}",
+    f"unique[inverse] {u[v]}",
+)
+```
+
+```{raw-cell}
 # apply demag
-colls = [COLL0.copy(style_label='No Demag')]
-colls.append(apply_demag(COLL0, xi_vector, inplace=False, style={"label":"Full demag"}))
+colls = [COLL0.copy(style_label="No Demag")]
+colls.append(
+    apply_demag(COLL0, xi_vector, inplace=False, style={"label": "Full demag"})
+)
 # colls.append(
 #     apply_demag(
 #         COLL0,
@@ -78,22 +181,22 @@ colls.append(
         xi_vector,
         inplace=False,
         pairs_matching=True,
-        style={"label":"Pairs matching"},
+        style={"label": "Pairs matching"},
     )
 )
-for max_dist in [2,3,5,10,20]:
+for max_dist in [2, 3, 5, 10, 20]:
     colls.append(
         apply_demag(
             COLL0,
             xi_vector,
             inplace=False,
             max_dist=max_dist,
-            style={"label":f"Max distance matching (={max_dist:02d})"},
+            style={"label": f"Max distance matching (={max_dist:02d})"},
         )
     )
 ```
 
-```{code-cell} ipython3
+```{raw-cell}
 B_cols = ["Bx [mT]", "By [mT]", "Bz [mT]"]
 
 
@@ -123,52 +226,42 @@ df = pd.concat(
         read_FEM_data("FEMdata_test_cuboids.csv", "FEM (ANSYS)"),
         *[get_magpylib_data(coll, sensor) for coll in colls],
     ]
-)
-df
+).sort_values(["Source_type", "Distance [mm]"])
 ```
 
-```{code-cell} ipython3
+```{raw-cell}
 colls[0].show()
 ```
 
-```{code-cell} ipython3
-fig = px.line(
-    df,
+```{raw-cell}
+px_kwargs = dict(
     x="Distance [mm]",
     y=B_cols,
     facet_col="variable",
     color="Source_type",
     line_dash="Source_type",
-    #height=600,
-    title="FEM vs Magpylib vs Magpylib+Demag",
+    # height=600,
     facet_col_spacing=0.05,
 )
-fig.update_yaxes(matches=None, showticklabels=True)
-```
+fig1 = px.line(
+    df,
+    title="FEM vs Magpylib vs Magpylib+Demag",
+    **px_kwargs,
+)
+fig1.update_yaxes(matches=None, showticklabels=True)
 
-```{code-cell} ipython3
-dff = df.sort_values(["Source_type", "Distance [mm]"])
+df_diff = df.copy()
 ref = "Full demag"
-for st in dff["Source_type"].unique():
-    dff.loc[dff["Source_type"] == st, B_cols] -= df.loc[
+for st in df_diff["Source_type"].unique():
+    df_diff.loc[df_diff["Source_type"] == st, B_cols] -= df.loc[
         df["Source_type"] == ref, B_cols
     ].values
 
-
-fig = px.line(
+fig2 = px.line(
     dff,
-    x="Distance [mm]",
-    y=B_cols,
-    facet_col="variable",
-    color="Source_type",
-    line_dash="Source_type",
-    #height=600,
     title=f"FEM vs Magpylib vs Magpylib+Demag (diff vs {ref})",
-    facet_col_spacing=0.05,
+    **px_kwargs,
 )
-fig.update_yaxes(matches=None, showticklabels=True)
-```
-
-```{code-cell} ipython3
-
+fig2.update_yaxes(matches=None, showticklabels=True)
+display(fig1, fig2)
 ```
