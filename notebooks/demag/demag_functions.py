@@ -81,9 +81,9 @@ def demag_tensor(
     if pairs_matching and split != 1:
         raise ValueError("Pairs matching does not support splitting")
     elif max_dist != 0:
-        getH_params, mask_inds, rot0 = filter_distance(src_list, max_dist)
+        getH_params, mask_inds, pos0, rot0 = filter_distance(src_list, max_dist)
     elif pairs_matching:
-        getH_params, mask_inds, unique_inv_inds, rot0 = match_pairs(src_list)
+        getH_params, mask_inds, unique_inv_inds, pos0, rot0 = match_pairs(src_list)
     else:
         pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
         rotQ0 = [src.orientation.as_quat() for src in src_list]
@@ -150,9 +150,10 @@ def filter_distance(src_list, max_dist):
     pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
     rotQ0 = [src.orientation.as_quat() for src in src_list]
     rot0 = R.from_quat(rotQ0)
+    dim0 = [src.dimension for src in src_list]
+
     pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
     dist2 = np.linalg.norm(pos2, axis=1)
-    dim0 = [src.dimension for src in src_list]
     dim2 = np.tile(dim0, (len(dim0), 1)), np.repeat(dim0, len(dim0), axis=0)
     maxdim2 = np.concatenate(dim2, axis=1).max(axis=1)
     mask = (dist2 / maxdim2) < max_dist
@@ -164,14 +165,14 @@ def filter_distance(src_list, max_dist):
     )
     dsf = sum(~mask) / len(mask) * 100
     log_msg = (
-        f"Distance factor savings: {dsf:.2f}%"
+        f"Distance factor savings: <blue>{dsf:.2f}%</blue>"
         f"<green> 🕑 {round(perf_counter()-filter_distance_time, 3)}sec</green>"
     )
     if dsf == 0:
         logger.opt(colors=True).warning(log_msg)
     else:
         logger.opt(colors=True).success(log_msg)
-    return params, mask, rot0
+    return params, mask, pos0, rot0
 
 
 def match_pairs(src_list):
@@ -209,8 +210,9 @@ def match_pairs(src_list):
         _, unique_inds, unique_inv_inds = np.unique(
             prop, return_index=True, return_inverse=True, axis=0
         )
+        sav_perc = len(unique_inds) / len(unique_inv_inds)*100
         logger.opt(colors=True).success(
-            f"Pair matching savings: {len(unique_inds) / len(unique_inv_inds)*100:.2f}%"
+            f"Pair matching savings: <blue>{sav_perc:.2f}%</blue>"
             f"<green> 🕑 {round(perf_counter()-match_pairs_time, 3)}sec</green>"
         )
 
@@ -220,7 +222,7 @@ def match_pairs(src_list):
         orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[unique_inds],
         dimension=np.repeat(dim0, len(src_list), axis=0)[unique_inds],
     )
-    return params, unique_inds, unique_inv_inds, rot0
+    return params, unique_inds, unique_inv_inds, pos0, rot0
 
 
 def invert(matrix, solver):
