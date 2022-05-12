@@ -27,7 +27,7 @@ mag1 = (0, 0, 1000)
 dim1 = (1, 1, 2)
 cube1 = magpy.magnet.Cuboid(mag1, dim1, (0, 0, 0.5))
 col1 = mesh_Cuboid(cube1, elems)
-xi1 = [0.5] * len(col1)
+col1.xi = 0.5
 
 # soft magnet
 mag2 = (0, 0, 0)
@@ -35,11 +35,10 @@ dim2 = (1, 1, 1)
 cube2 = magpy.magnet.Cuboid(mag2, dim2, (0, 0, 0))
 cube2.rotate_from_angax(angle=45, axis="y", anchor=None).move((1.5, 0, 0))
 col2 = mesh_Cuboid(cube2, elems)
-xi2 = [3999] * len(col2)
+col2.xi = 3999
 
 # super collection
 COL0 = cube1 + cube2
-xi_vector = np.array(xi1 + xi2)
 #magpy.show(cube1, cube2, sensors)
 
 # add sensors
@@ -53,7 +52,7 @@ sensors = [
 # apply demag
 COL1 = col1 + col2
 
-apply_demag(COL1, xi_vector, demag_store=False, demag_load=False)
+apply_demag(COL1, demag_store=False, demag_load=False)
 
 
 print("\nAfter demagnetization:")

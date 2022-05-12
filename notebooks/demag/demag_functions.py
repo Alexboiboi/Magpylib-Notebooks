@@ -30,6 +30,25 @@ logger.configure(**config)
 # -
 
 
+def get_xi(*sources, xi=None):
+    """Return a list of length (len(sources)) with xi values
+    Priority is given at the source level, hovever if value is not found, it is searched up the
+    the parent tree, if available. Raises an error if no value is found when reached the top
+    level of the tree"""
+    xis = []
+    for src in sources:
+        xi = getattr(src, "xi", None)
+        if xi is None:
+            if src.parent is None:
+                raise ValueError(
+                    "No susceptibility `xi` defined in any parent collection"
+                )
+            xis.extend(get_xi(src.parent))
+        else:
+            xis.append(xi)
+    return xis
+
+
 def demag_tensor(
     src_list, store=False, load=False, pairs_matching=False, split=False, max_dist=0
 ):
@@ -182,35 +201,25 @@ def match_pairs(src_list):
     if not all_cuboids:
         raise ValueError("Pairs matching only implemented if all sources are Cuboids")
     pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
-    rotQ0 = [src.orientation.as_quat() for src in src_list]
-    rot0 = R.from_quat(rotQ0)
-    mag0 = [src.magnetization for src in src_list]
+    rotmx0 = [src.orientation.as_matrix() for src in src_list]
+    rot0 = R.from_matrix(rotmx0)
     dim0 = [src.dimension for src in src_list]
-
     num_of_pairs = len(src_list) ** 2
     with logger.contextualize(task="Match interactions pairs"):
         logger.info("position")
         pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
         logger.info("orientation")
-        rot0Q1 = np.tile(rotQ0, (len(rotQ0), 1))
-        rot0Q2 = np.repeat(rotQ0, len(rotQ0), axis=0)
-        # checking relative orientation is very expensive, often not worth the savings
-        rot2 = (
-            (R.from_quat(rot0Q1) * R.from_quat(rot0Q2))
-            .as_matrix()
-            .reshape((num_of_pairs, -1))
-        )
+        rotmx2a = np.tile(rotmx0, (len(rotmx0), 1)).reshape((num_of_pairs, -1))
+        rotmx2b = np.repeat(rotmx0, len(rotmx0), axis=0).reshape((num_of_pairs, -1))
         logger.info("dimension")
         dim2 = np.tile(dim0, (len(dim0), 1)) - np.repeat(dim0, len(dim0), axis=0)
-        logger.info("magnetization")
-        mag2 = np.tile(mag0, (len(mag0), 1)) - np.repeat(mag0, len(mag0), axis=0)
         logger.info("concatenate properties")
-        prop = (np.concatenate([pos2, rot2, dim2, mag2], axis=1) + 1e-9).round(8)
+        prop = (np.concatenate([pos2, rotmx2a, rotmx2b, dim2], axis=1) + 1e-9).round(8)
         logger.info("find unique indices")
         _, unique_inds, unique_inv_inds = np.unique(
             prop, return_index=True, return_inverse=True, axis=0
         )
-        sav_perc = len(unique_inds) / len(unique_inv_inds)*100
+        sav_perc = 100 - len(unique_inds) / len(unique_inv_inds) * 100
         logger.opt(colors=True).success(
             f"Pair matching savings: <blue>{sav_perc:.2f}%</blue>"
             f"<green> 🕑 {round(perf_counter()-match_pairs_time, 3)}sec</green>"
@@ -219,7 +228,9 @@ def match_pairs(src_list):
     params = dict(
         observers=np.tile(pos0, (len(src_list), 1))[unique_inds],
         position=np.repeat(pos0, len(src_list), axis=0)[unique_inds],
-        orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[unique_inds],
+        orientation=R.from_matrix(np.repeat(rotmx0, len(src_list), axis=0))[
+            unique_inds
+        ],
         dimension=np.repeat(dim0, len(src_list), axis=0)[unique_inds],
     )
     return params, unique_inds, unique_inv_inds, pos0, rot0
@@ -261,7 +272,7 @@ def invert(matrix, solver):
 
 def apply_demag(
     collection,
-    xi,
+    xi=None,
     solver="np.linalg.inv",
     demag_store=False,
     demag_load=False,
@@ -280,7 +291,8 @@ def apply_demag(
         Each magnet source in collection is treated as a magnetic cell.
 
     xi: array_like, shape (n,)
-        Vector of n magnetic susceptibilities of the cells.
+        Vector of n magnetic susceptibilities of the cells. If not defined, values are searched at
+        object level or parent level if needed.
 
     solver: str, default='np.linalg.inv'
         Solver to be used. Must be one of (np.linalg.inv, ).
@@ -340,6 +352,8 @@ def apply_demag(
     )  # shape ii = x1, ... xn, y1, ... yn, z1, ... zn
 
     # set up S
+    if xi is None:
+        xi = get_xi(*src_list)
     xi = np.array(xi)
     if len(xi) != n:
         raise ValueError("Apply_demag input collection and xi must have same length.")

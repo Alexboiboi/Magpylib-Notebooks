@@ -31,28 +31,27 @@ from meshing_functions import mesh_Cuboid
 magpy.defaults.display.backend = "plotly"
 
 # number of target mesh elements
-target_cells = 20
+target_cells = 200
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
 coll1 = mesh_Cuboid(cube1, target_cells)
 coll1.move((-1.5, 0, 0))
-xi1 = [0.3] * len(coll1)  # mur=1.3
+coll1.xi = 0.3  # mur=1.3
 
 cube2 = magpy.magnet.Cuboid(magnetization=(900, 0, 0), dimension=(1, 1, 1))
 coll2 = mesh_Cuboid(cube2, target_cells)
 coll2.rotate_from_angax(-45, "y").move((0, 0, 0.2))
-xi2 = [1.0] * len(coll2)  # mur=2.0
+coll2.xi = 1.0  # mur=2.0
 
 mx, my = 600 * np.sin(30 / 180 * np.pi), 600 * np.cos(30 / 180 * np.pi)
 cube3 = magpy.magnet.Cuboid(magnetization=(mx, my, 0), dimension=(1, 1, 2))
 coll3 = mesh_Cuboid(cube3, target_cells)
 coll3.move((1.6, 0, 0.5)).rotate_from_angax(30, "z")
-xi3 = [0.5] * len(coll3)  # mu3=1.5
+coll3.xi = 0.5  # mu3=1.5
 
 # collection of all cells
 COLL0 = magpy.Collection(coll1, coll2, coll3)
-xi_vector = np.array(xi1 + xi2 + xi3)
 
 # sensor
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
@@ -176,7 +175,7 @@ def show_filter_distance(collection):
     max_dist_slider = widgets.FloatSlider(
         min=0,
         max=10,
-        value=1,
+        value=5,
         description="Max distance",
         style=dict(description_width="auto"),
         continuous_update=False,
