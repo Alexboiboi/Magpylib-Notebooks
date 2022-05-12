@@ -261,7 +261,7 @@ def invert(quat, solver):
     if solver == "np.linalg.inv":
         res = np.linalg.inv(quat)
         logger.opt(colors=True).success(
-            f"quat inversion done"
+            f"Matrix inversion done"
             f"<green> 🕑 {round(perf_counter()- quat_inv_start_time, 3)}sec</green>"
         )
         return res
