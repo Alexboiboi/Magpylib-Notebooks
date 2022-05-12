@@ -201,20 +201,21 @@ def match_pairs(src_list):
     if not all_cuboids:
         raise ValueError("Pairs matching only implemented if all sources are Cuboids")
     pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
-    rotmx0 = [src.orientation.as_matrix() for src in src_list]
-    rot0 = R.from_matrix(rotmx0)
+    rotQ0 = [src.orientation.as_quat() for src in src_list]
+    rot0 = R.from_quat(rotQ0)
     dim0 = [src.dimension for src in src_list]
-    num_of_pairs = len(src_list) ** 2
+    len_src = len(src_list)
+    num_of_pairs = len_src**2
     with logger.contextualize(task="Match interactions pairs"):
         logger.info("position")
-        pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
+        pos2 = np.tile(pos0, (len_src, 1)) - np.repeat(pos0, len_src, axis=0)
         logger.info("orientation")
-        rotmx2a = np.tile(rotmx0, (len(rotmx0), 1)).reshape((num_of_pairs, -1))
-        rotmx2b = np.repeat(rotmx0, len(rotmx0), axis=0).reshape((num_of_pairs, -1))
+        rotQ2a = np.tile(rotQ0, (len_src, 1)).reshape((num_of_pairs, -1))
+        rotQ2b = np.repeat(rotQ0, len_src, axis=0).reshape((num_of_pairs, -1))
         logger.info("dimension")
-        dim2 = np.tile(dim0, (len(dim0), 1)) - np.repeat(dim0, len(dim0), axis=0)
+        dim2 = np.tile(dim0, (len_src, 1)) - np.repeat(dim0, len_src, axis=0)
         logger.info("concatenate properties")
-        prop = (np.concatenate([pos2, rotmx2a, rotmx2b, dim2], axis=1) + 1e-9).round(8)
+        prop = (np.concatenate([pos2, rotQ2a, rotQ2b, dim2], axis=1) + 1e-9).round(8)
         logger.info("find unique indices")
         _, unique_inds, unique_inv_inds = np.unique(
             prop, return_index=True, return_inverse=True, axis=0
@@ -228,42 +229,40 @@ def match_pairs(src_list):
     params = dict(
         observers=np.tile(pos0, (len(src_list), 1))[unique_inds],
         position=np.repeat(pos0, len(src_list), axis=0)[unique_inds],
-        orientation=R.from_matrix(np.repeat(rotmx0, len(src_list), axis=0))[
-            unique_inds
-        ],
+        orientation=R.from_quat(rotQ2b)[unique_inds],
         dimension=np.repeat(dim0, len(src_list), axis=0)[unique_inds],
     )
     return params, unique_inds, unique_inv_inds, pos0, rot0
 
 
-def invert(matrix, solver):
+def invert(quat, solver):
     """
-    Matrix inversion
+    quat inversion
 
     Parameters
     ----------
-    matrix: np.array, shape (n,n)
-        Input matrix to be inverted.
+    quat: np.array, shape (n,n)
+        Input quat to be inverted.
 
     solver: str
         Solver to be used. Must be one of (np.linalg.inv, ).
 
     Returns
     -------
-    matrix_inverse: ndarray, shape (n,n)
+    quat_inverse: ndarray, shape (n,n)
 
 
     TODO implement and test different solver packages
-    TODO check input matrix and auto-select correct solver (direct, iterative, ...)
+    TODO check input quat and auto-select correct solver (direct, iterative, ...)
     """
-    matrix_inv_start_time = perf_counter()
+    quat_inv_start_time = perf_counter()
     logger.info("Start solving with " + solver)
 
     if solver == "np.linalg.inv":
-        res = np.linalg.inv(matrix)
+        res = np.linalg.inv(quat)
         logger.opt(colors=True).success(
-            f"Matrix inversion done"
-            f"<green> 🕑 {round(perf_counter()- matrix_inv_start_time, 3)}sec</green>"
+            f"quat inversion done"
+            f"<green> 🕑 {round(perf_counter()- quat_inv_start_time, 3)}sec</green>"
         )
         return res
 
@@ -381,7 +380,7 @@ def apply_demag(
 
     # set up and invert Q
     Q = np.eye(3 * n) - np.matmul(S, T)
-    Q_inv = invert(matrix=Q, solver=solver)
+    Q_inv = invert(quat=Q, solver=solver)
 
     # determine new magnetization vectors
     mag_new = np.matmul(Q_inv, mag)
