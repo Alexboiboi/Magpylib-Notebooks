@@ -5,6 +5,7 @@
 import sys
 from time import perf_counter
 from collections import Counter
+from contextlib import contextmanager
 
 from loguru import logger
 import numpy as np
@@ -26,6 +27,24 @@ config = {
     ],
 }
 logger.configure(**config)
+
+@contextmanager
+def loguru_catchtime(msg, min_log_time=0) -> float:
+    """"Measure and log time with loguru as context manager."""
+    logger.opt(colors=True).info(msg)
+    start = perf_counter()
+    end=None
+    try:
+        yield
+        end = perf_counter() - start
+    finally:
+        if end is None:
+            logger.opt(colors=True).exception(f"{msg} failed")
+
+    if end > min_log_time:
+        logger.opt(colors=True).success(
+            f"{msg} done" f"<green> 🕑 {round(end, 3)}sec</green>"
+        )
 
 # -
 
@@ -112,41 +131,37 @@ def demag_tensor(
     for unit_mag in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
         mag_all = rot0.inv().apply(unit_mag)
         # point matching field and demag tensor
-        getH_time = perf_counter()
-        if pairs_matching or max_dist != 0:
-            magnetization = np.repeat(mag_all, len(src_list), axis=0)[mask_inds]
-            H_unique = magpy.getH("Cuboid", magnetization=magnetization, **getH_params)
-            if max_dist != 0:
-                H_temp = np.zeros((len(src_list) ** 2, 3))
-                H_temp[mask_inds] = H_unique
-                H_unit_mag = H_temp
+        with loguru_catchtime("getH with unit_mag={unit_mag}"):
+            if pairs_matching or max_dist != 0:
+                magnetization = np.repeat(mag_all, len(src_list), axis=0)[mask_inds]
+                H_unique = magpy.getH("Cuboid", magnetization=magnetization, **getH_params)
+                if max_dist != 0:
+                    H_temp = np.zeros((len(src_list) ** 2, 3))
+                    H_temp[mask_inds] = H_unique
+                    H_unit_mag = H_temp
+                else:
+                    H_unit_mag = H_unique[unique_inv_inds]
             else:
-                H_unit_mag = H_unique[unique_inv_inds]
-        else:
-            for src, mag in zip(src_list, mag_all):
-                src.magnetization = mag
-            if split > 1:
-                src_list_split = np.array_split(src_list, split)
-                with logger.contextualize(
-                    task="Splitting field calculation", split=split
-                ):
-                    H_unit_mag = []
-                    for split_ind, src_list_subset in enumerate(src_list_split):
-                        logger.info(
-                            f"Sources subset {split_ind+1}/{len(src_list_split)}"
-                        )
-                        if src_list_subset.size > 0:
-                            H_unit_mag.append(
-                                magpy.getH(src_list_subset.tolist(), pos0)
+                for src, mag in zip(src_list, mag_all):
+                    src.magnetization = mag
+                if split > 1:
+                    src_list_split = np.array_split(src_list, split)
+                    with logger.contextualize(
+                        task="Splitting field calculation", split=split
+                    ):
+                        H_unit_mag = []
+                        for split_ind, src_list_subset in enumerate(src_list_split):
+                            logger.info(
+                                f"Sources subset {split_ind+1}/{len(src_list_split)}"
                             )
-                    H_unit_mag = np.concatenate(H_unit_mag, axis=0)
-            else:
-                H_unit_mag = magpy.getH(src_list, pos0)
-        H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
-        logger.opt(colors=True).success(
-            f"getH with unit_mag={unit_mag} done"
-            f"<green> 🕑 {round(perf_counter()-getH_time, 3)}sec</green>"
-        )
+                            if src_list_subset.size > 0:
+                                H_unit_mag.append(
+                                    magpy.getH(src_list_subset.tolist(), pos0)
+                                )
+                        H_unit_mag = np.concatenate(H_unit_mag, axis=0)
+                else:
+                    H_unit_mag = magpy.getH(src_list, pos0)
+            H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
 
     # shape (3_unit_mag, n_cells, n_pos, 3_xyz)
     T = np.array(H_point).reshape((3, n, n, 3))
@@ -162,30 +177,29 @@ def demag_tensor(
 
 def filter_distance(src_list, max_dist):
     """filter indices by distance parameter"""
-    filter_distance_time = perf_counter()
-    all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
-    if not all_cuboids:
-        raise ValueError("filter_distance only implemented if all sources are Cuboids")
-    pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
-    rotQ0 = [src.orientation.as_quat() for src in src_list]
-    rot0 = R.from_quat(rotQ0)
-    dim0 = [src.dimension for src in src_list]
+    with loguru_catchtime("Distance filter"):
+        all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+        if not all_cuboids:
+            raise ValueError("filter_distance only implemented if all sources are Cuboids")
+        pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+        rotQ0 = [src.orientation.as_quat() for src in src_list]
+        rot0 = R.from_quat(rotQ0)
+        dim0 = [src.dimension for src in src_list]
 
-    pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
-    dist2 = np.linalg.norm(pos2, axis=1)
-    dim2 = np.tile(dim0, (len(dim0), 1)), np.repeat(dim0, len(dim0), axis=0)
-    maxdim2 = np.concatenate(dim2, axis=1).max(axis=1)
-    mask = (dist2 / maxdim2) < max_dist
-    params = dict(
-        observers=np.tile(pos0, (len(src_list), 1))[mask],
-        position=np.repeat(pos0, len(src_list), axis=0)[mask],
-        orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
-        dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
-    )
-    dsf = sum(~mask) / len(mask) * 100
+        pos2 = np.tile(pos0, (len(pos0), 1)) - np.repeat(pos0, len(pos0), axis=0)
+        dist2 = np.linalg.norm(pos2, axis=1)
+        dim2 = np.tile(dim0, (len(dim0), 1)), np.repeat(dim0, len(dim0), axis=0)
+        maxdim2 = np.concatenate(dim2, axis=1).max(axis=1)
+        mask = (dist2 / maxdim2) < max_dist
+        params = dict(
+            observers=np.tile(pos0, (len(src_list), 1))[mask],
+            position=np.repeat(pos0, len(src_list), axis=0)[mask],
+            orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
+            dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
+        )
+        dsf = sum(~mask) / len(mask) * 100
     log_msg = (
         f"Distance factor savings: <blue>{dsf:.2f}%</blue>"
-        f"<green> 🕑 {round(perf_counter()-filter_distance_time, 3)}sec</green>"
     )
     if dsf == 0:
         logger.opt(colors=True).warning(log_msg)
@@ -196,42 +210,39 @@ def filter_distance(src_list, max_dist):
 
 def match_pairs(src_list):
     """match all pairs of sources from `src_list`"""
-    match_pairs_time = perf_counter()
-    all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
-    if not all_cuboids:
-        raise ValueError("Pairs matching only implemented if all sources are Cuboids")
-    pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
-    rotQ0 = [src.orientation.as_quat() for src in src_list]
-    rot0 = R.from_quat(rotQ0)
-    dim0 = [src.dimension for src in src_list]
-    len_src = len(src_list)
-    num_of_pairs = len_src**2
-    with logger.contextualize(task="Match interactions pairs"):
-        logger.info("position")
-        pos2 = np.tile(pos0, (len_src, 1)) - np.repeat(pos0, len_src, axis=0)
-        logger.info("orientation")
-        rotQ2a = np.tile(rotQ0, (len_src, 1)).reshape((num_of_pairs, -1))
-        rotQ2b = np.repeat(rotQ0, len_src, axis=0).reshape((num_of_pairs, -1))
-        logger.info("dimension")
-        dim2 = np.tile(dim0, (len_src, 1)) - np.repeat(dim0, len_src, axis=0)
-        logger.info("concatenate properties")
-        prop = (np.concatenate([pos2, rotQ2a, rotQ2b, dim2], axis=1) + 1e-9).round(8)
-        logger.info("find unique indices")
-        _, unique_inds, unique_inv_inds = np.unique(
-            prop, return_index=True, return_inverse=True, axis=0
-        )
-        sav_perc = 100 - len(unique_inds) / len(unique_inv_inds) * 100
-        logger.opt(colors=True).success(
-            f"Pair matching savings: <blue>{sav_perc:.2f}%</blue>"
-            f"<green> 🕑 {round(perf_counter()-match_pairs_time, 3)}sec</green>"
-        )
+    with loguru_catchtime("Pairs matching"):
+        all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+        if not all_cuboids:
+            raise ValueError("Pairs matching only implemented if all sources are Cuboids")
+        pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
+        rotQ0 = [src.orientation.as_quat() for src in src_list]
+        rot0 = R.from_quat(rotQ0)
+        dim0 = [src.dimension for src in src_list]
+        len_src = len(src_list)
+        num_of_pairs = len_src**2
+        with logger.contextualize(task="Match interactions pairs"):
+            logger.info("position")
+            pos2 = np.tile(pos0, (len_src, 1)) - np.repeat(pos0, len_src, axis=0)
+            logger.info("orientation")
+            rotQ2a = np.tile(rotQ0, (len_src, 1)).reshape((num_of_pairs, -1))
+            rotQ2b = np.repeat(rotQ0, len_src, axis=0).reshape((num_of_pairs, -1))
+            logger.info("dimension")
+            dim2 = np.tile(dim0, (len_src, 1)) - np.repeat(dim0, len_src, axis=0)
+            logger.info("concatenate properties")
+            prop = (np.concatenate([pos2, rotQ2a, rotQ2b, dim2], axis=1) + 1e-9).round(8)
+            logger.info("find unique indices")
+            _, unique_inds, unique_inv_inds = np.unique(
+                prop, return_index=True, return_inverse=True, axis=0
+            )
+            sav_perc = 100 - len(unique_inds) / len(unique_inv_inds) * 100
+            logger.opt(colors=True).info(f"Pair matching savings: <blue>{sav_perc:.2f}%</blue>")
 
-    params = dict(
-        observers=np.tile(pos0, (len(src_list), 1))[unique_inds],
-        position=np.repeat(pos0, len(src_list), axis=0)[unique_inds],
-        orientation=R.from_quat(rotQ2b)[unique_inds],
-        dimension=np.repeat(dim0, len(src_list), axis=0)[unique_inds],
-    )
+        params = dict(
+            observers=np.tile(pos0, (len(src_list), 1))[unique_inds],
+            position=np.repeat(pos0, len(src_list), axis=0)[unique_inds],
+            orientation=R.from_quat(rotQ2b)[unique_inds],
+            dimension=np.repeat(dim0, len(src_list), axis=0)[unique_inds],
+        )
     return params, unique_inds, unique_inv_inds, pos0, rot0
 
 
@@ -255,16 +266,10 @@ def invert(quat, solver):
     TODO implement and test different solver packages
     TODO check input quat and auto-select correct solver (direct, iterative, ...)
     """
-    quat_inv_start_time = perf_counter()
-    logger.info("Start solving with " + solver)
-
-    if solver == "np.linalg.inv":
-        res = np.linalg.inv(quat)
-        logger.opt(colors=True).success(
-            f"Matrix inversion done"
-            f"<green> 🕑 {round(perf_counter()- quat_inv_start_time, 3)}sec</green>"
-        )
-        return res
+    with loguru_catchtime(f'Matrix inversion with {solver}'):
+        if solver == "np.linalg.inv":
+            res = np.linalg.inv(quat)
+            return res
 
     raise ValueError("Bad solver input.")
 
@@ -328,7 +333,6 @@ def apply_demag(
     -------
     None
     """
-    demag_start_time = perf_counter()
     if not inplace:
         collection = collection.copy()
     if style is not None:
@@ -337,62 +341,54 @@ def apply_demag(
     src_list = collection.sources_all
     n = len(src_list)
     counts = Counter(s._object_type for s in src_list)
-    logger.opt(colors=True).info(
-        f"Start demagnetization computation of <blue>{collection}</blue> with {n} cells - {counts}"
-        f""" {"(inplace)" if inplace else ""}"""
+    inplace_str =  f"""{" (inplace) " if inplace else " "}"""
+    demag_msg = (
+        f"Demagnetization computation{inplace_str}of <blue>{collection}</blue>"
+        f" with {n} cells - {counts}"
     )
+    with loguru_catchtime(demag_msg):
+        # set up mr
+        mag = [
+            src.orientation.apply(src.magnetization) for src in src_list
+        ]  # ROTATION CHECK
+        mag = np.reshape(
+            mag, (3 * n, 1), order="F"
+        )  # shape ii = x1, ... xn, y1, ... yn, z1, ... zn
 
-    # set up mr
-    mag = [
-        src.orientation.apply(src.magnetization) for src in src_list
-    ]  # ROTATION CHECK
-    mag = np.reshape(
-        mag, (3 * n, 1), order="F"
-    )  # shape ii = x1, ... xn, y1, ... yn, z1, ... zn
+        # set up S
+        if xi is None:
+            xi = get_xi(*src_list)
+        xi = np.array(xi)
+        if len(xi) != n:
+            raise ValueError("Apply_demag input collection and xi must have same length.")
+        S = np.diag(np.tile(xi, 3))  # shape ii, jj
 
-    # set up S
-    if xi is None:
-        xi = get_xi(*src_list)
-    xi = np.array(xi)
-    if len(xi) != n:
-        raise ValueError("Apply_demag input collection and xi must have same length.")
-    S = np.diag(np.tile(xi, 3))  # shape ii, jj
+        # set up T (3 mag unit, n cells, n positions, 3 Bxyz)
+        with loguru_catchtime("Demagnetization tensor calculation"):
+            T = demag_tensor(
+                src_list,
+                store=demag_store,
+                load=demag_load,
+                split=split,
+                pairs_matching=pairs_matching,
+                max_dist=max_dist,
+            )
+        # T = T.swapaxes(0, 3)
+        T = T * (4 * np.pi / 10)
+        T = T.swapaxes(2, 3)
+        T = np.reshape(T, (3 * n, 3 * n)).T  # shape ii, jj
 
-    # set up T (3 mag unit, n cells, n positions, 3 Bxyz)
-    demag_tensor_start_time = perf_counter()
-    logger.info("Start demagnetization tensor calculation")
-    T = demag_tensor(
-        src_list,
-        store=demag_store,
-        load=demag_load,
-        split=split,
-        pairs_matching=pairs_matching,
-        max_dist=max_dist,
-    )
-    logger.opt(colors=True).success(
-        f"Demagnetization tensor calculation done"
-        f"<green> 🕑 {round(perf_counter()- demag_tensor_start_time, 3)}sec</green>"
-    )
-    # T = T.swapaxes(0, 3)
-    T = T * (4 * np.pi / 10)
-    T = T.swapaxes(2, 3)
-    T = np.reshape(T, (3 * n, 3 * n)).T  # shape ii, jj
+        # set up and invert Q
+        Q = np.eye(3 * n) - np.matmul(S, T)
+        Q_inv = invert(quat=Q, solver=solver)
 
-    # set up and invert Q
-    Q = np.eye(3 * n) - np.matmul(S, T)
-    Q_inv = invert(quat=Q, solver=solver)
+        # determine new magnetization vectors
+        mag_new = np.matmul(Q_inv, mag)
+        mag_new = np.reshape(mag_new, (n, 3), order="F")
+        # mag_new *= .4*np.pi
 
-    # determine new magnetization vectors
-    mag_new = np.matmul(Q_inv, mag)
-    mag_new = np.reshape(mag_new, (n, 3), order="F")
-    # mag_new *= .4*np.pi
+        for s, mag in zip(collection.sources_all, mag_new):
+            s.magnetization = s.orientation.inv().apply(mag)  # ROTATION CHECK
 
-    for s, mag in zip(collection.sources_all, mag_new):
-        s.magnetization = s.orientation.inv().apply(mag)  # ROTATION CHECK
-
-    logger.opt(colors=True).success(
-        f"Demagnetization computation done"
-        f"<green> 🕑 {round(perf_counter()- demag_start_time, 3)}sec</green>"
-    )
     if not inplace:
         return collection
