@@ -5,12 +5,17 @@ jupytext:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.6
+    jupytext_version: 1.13.7
 kernelspec:
-  display_name: Python 3
+  display_name: Python 3 (ipykernel)
   language: python
   name: python3
 ---
+
+```{code-cell} ipython3
+%load_ext autoreload
+%autoreload 2
+```
 
 ```{code-cell} ipython3
 import magpylib as magpy
@@ -49,7 +54,7 @@ sensors = [
 ```
 
 ```{code-cell} ipython3
-kwargs = dict(max_passes=8, refine_factor=2, max_dist=3, mag_diff_thresh=200)
+kwargs = dict(max_passes=8, refine_factor=2, max_dist=30, mag_diff_thresh=200, max_elems=None)
 coll = apply_demag_with_refinement(
     collection=COLL0,
     inplace=False,
@@ -112,15 +117,17 @@ fig = px.line(
     height=600,
     title='FEM vs Magpylib vs Magpylib+Demag',
 )
+
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
 
 ```{code-cell} ipython3
+ref = "FEM-fine"
 dff = df.sort_values(["Source_type", "Sensor_num", "Distance [mm]"])
 for st in dff["Source_type"].unique():
     cols = ["Bx [mT]", "Bz [mT]"]
     dff.loc[dff["Source_type"] == st, cols] -= df.loc[
-        df["Source_type"] == "FEM-fine", cols
+        df["Source_type"] == ref, cols
     ].values
 
 fig = px.line(
@@ -131,7 +138,7 @@ fig = px.line(
     facet_row="variable",
     color="Source_type",
     height=600,
-    title='Magpylib & Magpylib+Demag (diff vs FEM-fine)',
+    title=f'Magpylib & Magpylib+Demag (diff vs {ref})',
 )
 fig.update_yaxes(matches=None, showticklabels=True)
 ```

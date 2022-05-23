@@ -207,7 +207,7 @@ def filter_distance(src_list, max_dist, return_params=False, return_base_geo=Fal
                 dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
             )
         dsf = sum(~mask) / len(mask) * 100
-    log_msg = f"Distance factor savings: <blue>{dsf:.2f}%</blue>"
+    log_msg = f"Interaction pairs filtered out by distance factor: <blue>{dsf:.2f}%</blue>"
     if dsf == 0:
         logger.opt(colors=True).warning(log_msg)
     else:
@@ -286,7 +286,7 @@ def invert(quat, solver):
     TODO implement and test different solver packages
     TODO check input quat and auto-select correct solver (direct, iterative, ...)
     """
-    with loguru_catchtime(f"Matrix inversion with {solver}"):
+    with loguru_catchtime(f"Matrix inversion with <blue>{solver}</blue>"):
         if solver == "np.linalg.inv":
             res = np.linalg.inv(quat)
             return res
@@ -318,10 +318,11 @@ def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
 def apply_demag_with_refinement(
     collection,
     inplace=True,
-    max_passes=6,
     refine_factor=2,
     max_dist=2,
     mag_diff_thresh=500,
+    max_passes=10,
+    max_elems=None,
 ):
     """apply demag iteratively and recursively with refinement options"""
     if not inplace:
@@ -336,7 +337,7 @@ def apply_demag_with_refinement(
     while pass_num < max_passes and src_to_refine:
         pass_num += 1
         logger.opt(colors=True).info(
-            f"Adaptive pass <blue>{pass_num} (limit={max_passes})</blue>"
+            f"Adaptive pass <blue>{pass_num} (max={max_passes})</blue>"
         )
         src_list = coll.sources_all
         # store magnetizations before applying demag, to start next iteration with
@@ -348,10 +349,17 @@ def apply_demag_with_refinement(
             src_to_refine = find_sources_to_refine(
                 src_list, mag_diff_thresh=mag_diff_thresh, max_dist=max_dist
             )
+            new_extra_src = refine_factor * len(src_to_refine)
             if len(src_to_refine) == 0:
                 logger.opt(colors=True).success(
-                    f"No Sources to be refined, <red>stopping adaptive passes</red>"
+                    "No Sources to be refined, <red>stopping adaptive passes</red>"
                 )
+            elif max_elems is not None and len(src_list) + new_extra_src > max_elems:
+                logger.opt(colors=True).info(
+                    f"Refinement stopped with {len(src_list)} cells ({max_elems=})."
+                    f" Further adaptive pass would result in {len(src_list) + new_extra_src} cells."
+                )
+                break
             else:
                 logger.opt(colors=True).success(
                     f"Number of Sources refined : <blue>{len(src_to_refine)}</blue>"
