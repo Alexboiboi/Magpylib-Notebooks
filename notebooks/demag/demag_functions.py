@@ -2,9 +2,10 @@
 # +
 # pylint: disable=invalid-name, redefined-outer-name, protected-access
 import sys
+import threading
 from collections import Counter
 from contextlib import contextmanager
-from time import perf_counter
+import time
 
 import magpylib as magpy
 import numpy as np
@@ -29,16 +30,53 @@ config = {
 logger.configure(**config)
 
 
+class ElapsedTimeThread(threading.Thread):
+    """ "Stoppable thread that logs the time elapsed"""
+
+    def __init__(self, msg=None, min_log_time=1):
+        super(ElapsedTimeThread, self).__init__()
+        self._stop_event = threading.Event()
+        self.thread_start = time.time()
+        self.msg = msg
+        self.min_log_time = min_log_time
+        self._msg_displayed = False
+
+    def stop(self):
+        self._stop_event.set()
+
+    def stopped(self):
+        return self._stop_event.is_set()
+
+    def getStart(self):
+        return self.thread_start
+
+    def run(self):
+        self.thread_start = time.time()
+        while not self.stopped():
+            if (
+                self.msg is not None
+                and time.time() - self.thread_start > self.min_log_time
+                and not self._msg_displayed
+            ):
+                logger.opt(colors=True).info(f"Start {self.msg}")
+                self._msg_displayed = True
+            # include a delay here so the thread doesn't uselessly thrash the CPU
+            time.sleep(self.min_log_time / 5)
+
+
 @contextmanager
-def loguru_catchtime(msg, min_log_time=0) -> float:
+def loguru_catchtime(msg, min_log_time=1) -> float:
     """ "Measure and log time with loguru as context manager."""
-    logger.opt(colors=True).info(msg)
-    start = perf_counter()
+    start = time.perf_counter()
     end = None
+    threadTimer = ElapsedTimeThread(msg=msg, min_log_time=min_log_time)
+    threadTimer.start()
     try:
         yield
-        end = perf_counter() - start
+        end = time.perf_counter() - start
     finally:
+        threadTimer.stop()
+        threadTimer.join()
         if end is None:
             logger.opt(colors=True).exception(f"{msg} failed")
 
@@ -46,9 +84,6 @@ def loguru_catchtime(msg, min_log_time=0) -> float:
         logger.opt(colors=True).success(
             f"{msg} done" f"<green> 🕑 {round(end, 3)}sec</green>"
         )
-
-
-# -
 
 
 def get_xi(*sources, xi=None):
@@ -135,7 +170,7 @@ def demag_tensor(
     for unit_mag in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
         mag_all = rot0.inv().apply(unit_mag)
         # point matching field and demag tensor
-        with loguru_catchtime("getH with unit_mag={unit_mag}"):
+        with loguru_catchtime(f"getH with unit_mag={unit_mag}"):
             if pairs_matching or max_dist != 0:
                 magnetization = np.repeat(mag_all, len(src_list), axis=0)[mask_inds]
                 H_unique = magpy.getH(
@@ -167,7 +202,7 @@ def demag_tensor(
                         H_unit_mag = np.concatenate(H_unit_mag, axis=0)
                 else:
                     H_unit_mag = magpy.getH(src_list, pos0)
-            H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
+                H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
 
     # shape (3_unit_mag, n_cells, n_pos, 3_xyz)
     T = np.array(H_point).reshape((3, n, n, 3))
@@ -206,8 +241,8 @@ def filter_distance(src_list, max_dist, return_params=False, return_base_geo=Fal
                 orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
                 dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
             )
-        dsf = sum(~mask) / len(mask) * 100
-    log_msg = f"Interaction pairs filtered out by distance factor: <blue>{dsf:.2f}%</blue>"
+        dsf = sum(mask) / len(mask) * 100
+    log_msg = f"Interaction pairs left after distance factor filtering: <blue>{dsf:.2f}%</blue>"
     if dsf == 0:
         logger.opt(colors=True).warning(log_msg)
     else:
@@ -252,9 +287,9 @@ def match_pairs(src_list):
             _, unique_inds, unique_inv_inds = np.unique(
                 prop, return_index=True, return_inverse=True, axis=0
             )
-            sav_perc = 100 - len(unique_inds) / len(unique_inv_inds) * 100
+            perc = len(unique_inds) / len(unique_inv_inds) * 100
             logger.opt(colors=True).info(
-                f"Pair matching savings: <blue>{sav_perc:.2f}%</blue>"
+                f"Interaction pairs left after pair matching filtering: <blue>{perc:.2f}%</blue>"
             )
 
         params = dict(
@@ -297,7 +332,7 @@ def invert(quat, solver):
 def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
     """Return a set of sources from `src_list` which meet following criteria for refinement:"
     - relative-to-dimension pair of sources < `max_dist`
-    - norm(abs(mag1 -mag2)) < `mag_diff_thresh`
+    - norm(abs(mag1 -mag2)) > `mag_diff_thresh`
     """
     len_src = len(src_list)
     src_tile = np.tile(src_list, len_src)
@@ -362,7 +397,7 @@ def apply_demag_with_refinement(
                 break
             else:
                 logger.opt(colors=True).success(
-                    f"Number of Sources refined : <blue>{len(src_to_refine)}</blue>"
+                    f" Sources refined : <blue>{len(src_to_refine)/len(src_list)*100:.2f}%</blue>"
                 )
                 for src, mag in zip(src_list, mags_before_demag):
                     src._magnetization = mag
