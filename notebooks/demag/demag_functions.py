@@ -346,13 +346,41 @@ def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
     mag2 = np.tile(magr0, (len_src, 1)) - np.repeat(magr0, len_src, axis=0)
     mag_mask = np.linalg.norm(np.abs(mag2), axis=1) > mag_diff_thresh
     full_mask = dist_mask & mag_mask
-    src_to_refine = set(src_tile[full_mask]).intersection(src_repeat[full_mask])
-    return src_to_refine
+    srcs_to_refine = set(src_tile[full_mask]).intersection(src_repeat[full_mask])
+    return srcs_to_refine
+
+
+def find_sources_to_refine2(src_list, mag_diff_thresh=10, max_dist=1):
+    """Return a set of sources from `src_list` which meet following criteria for refinement:"
+    - relative-to-dimension pair of sources < `max_dist`
+    - norm(abs(mag1 -mag2)) > `mag_diff_thresh`
+    """
+    len_src = len(src_list)
+    src_tile = np.tile(src_list, len_src)
+    src_repeat = np.repeat(src_list, len_src)
+
+    dist_mask, pos0, rot0 = filter_distance(
+        src_list, max_dist=max_dist, return_base_geo=True
+    )
+    mag0 = [src.magnetization for src in src_list]
+    magr0 = rot0.apply(mag0)
+    mag2 = np.tile(magr0, (len_src, 1)) - np.repeat(magr0, len_src, axis=0)
+    mag2 = mag2[dist_mask]
+    src_tile = src_tile[dist_mask]
+    src_repeat = src_repeat[dist_mask]
+    mag_norm2 = np.linalg.norm(np.abs(mag2), axis=1)
+    # create index mask for the worst `mag_diff_thresh` percents, AFTER max_dist filtering
+    mag_mask = np.argsort(mag_norm2) >= min(
+        len(mag_norm2) - 1, (100 - mag_diff_thresh) / 100 * len(mag_norm2) - 1
+    )
+    srcs_to_refine = set(src_tile[mag_mask]).intersection(set(src_repeat[mag_mask]))
+    return srcs_to_refine
 
 
 def apply_demag_with_refinement(
     collection,
     inplace=True,
+    init_refine_factor=8,
     refine_factor=2,
     max_dist=2,
     mag_diff_thresh=500,
@@ -365,11 +393,16 @@ def apply_demag_with_refinement(
     else:
         coll = collection
 
+    # make initial refinement
+    if init_refine_factor>1:
+        refine(*coll.sources_all, factor=init_refine_factor)
+
     # initialize
     pass_num = 0
-    src_to_refine = True
+    srcs_to_refine = True
     # main loop
-    while pass_num < max_passes and src_to_refine:
+
+    while pass_num < max_passes and srcs_to_refine:
         pass_num += 1
         logger.opt(colors=True).info(
             f"Adaptive pass <blue>{pass_num} (max={max_passes})</blue>"
@@ -380,12 +413,12 @@ def apply_demag_with_refinement(
         mags_before_demag = np.array([src._magnetization for src in src_list])
         apply_demag(coll, inplace=True)
         # only apply refinement if necessary, last step loop must be demag
-        if pass_num != max_passes and src_to_refine:
-            src_to_refine = find_sources_to_refine(
+        if pass_num != max_passes and srcs_to_refine:
+            srcs_to_refine = find_sources_to_refine(
                 src_list, mag_diff_thresh=mag_diff_thresh, max_dist=max_dist
             )
-            new_extra_src = refine_factor * len(src_to_refine)
-            if len(src_to_refine) == 0:
+            new_extra_src = refine_factor * len(srcs_to_refine)
+            if len(srcs_to_refine) == 0:
                 logger.opt(colors=True).success(
                     "No Sources to be refined, <red>stopping adaptive passes</red>"
                 )
@@ -396,20 +429,28 @@ def apply_demag_with_refinement(
                 )
                 break
             else:
+                a, b = len(srcs_to_refine), len(src_list)
                 logger.opt(colors=True).success(
-                    f" Sources refined : <blue>{len(src_to_refine)/len(src_list)*100:.2f}%</blue>"
+                    f" Sources refined : <blue>{len(srcs_to_refine)}/{len(src_list)} ({a/b*100:.2f}%)</blue>"
                 )
                 for src, mag in zip(src_list, mags_before_demag):
                     src._magnetization = mag
-                for src in src_to_refine:
-                    parent = src.parent
-                    src.parent = None
-                    meshed_coll = mesh_Cuboid(src, refine_factor)
-                    for child in meshed_coll:
-                        child.xi = src.xi
-                    parent.add(meshed_coll)
+                refine(*srcs_to_refine, factor=refine_factor)
     if not inplace:
         return coll
+
+
+def refine(*sources, factor, mode="cuboids"):
+    """refine sources and replace them inplace with a meshed collection"""
+    if mode != "cuboids":
+        raise ValueError("Refinement only supports 'cuboids' mode")
+    for src in sources:
+        parent = src.parent
+        src.parent = None
+        meshed_coll = mesh_Cuboid(src, factor)
+        for child in meshed_coll:
+            child.xi = src.xi
+        parent.add(meshed_coll)
 
 
 def apply_demag(

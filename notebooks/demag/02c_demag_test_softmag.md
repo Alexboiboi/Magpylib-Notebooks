@@ -70,7 +70,7 @@ magpy.show(*COLL0, sensors, style_magnetization_show=False)
 
 ```{code-cell} ipython3
 kwargs = dict(
-    max_passes=12, refine_factor=2, max_dist=1, mag_diff_thresh=5000, max_elems=500
+    max_passes=16, init_refine_factor=10, refine_factor=2, max_dist=1, mag_diff_thresh=15, max_elems=1000
 )
 coll = apply_demag_with_refinement(
     collection=COLL0,
