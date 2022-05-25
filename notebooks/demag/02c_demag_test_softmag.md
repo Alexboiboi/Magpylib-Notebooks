@@ -70,7 +70,7 @@ magpy.show(*COLL0, sensors, style_magnetization_show=False)
 
 ```{code-cell} ipython3
 kwargs = dict(
-    max_passes=16, init_refine_factor=10, refine_factor=2, max_dist=1, mag_diff_thresh=15, max_elems=1000
+    max_passes=10, init_refine_factor=100, refine_factor=8, max_dist=1, mag_diff_thresh=2000, max_elems=2000
 )
 coll = apply_demag_with_refinement(
     collection=COLL0,
@@ -80,12 +80,20 @@ coll = apply_demag_with_refinement(
 ```
 
 ```{code-cell} ipython3
-#for src in coll.sources_all:
-#    src.style.magnetization.show = True if np.linalg.norm(src.magnetization) > 500 else False
-import plotly.graph_objects as go
-
+from matplotlib import cm
+color_map = cm.get_cmap('viridis', 20)
+mags = np.linalg.norm([src.magnetization for src in coll.sources_all], axis=1)
+mags = (mags-min(mags))/ np.ptp(mags) # normalize
+colors = color_map(mags)
+for src,mag,color in zip(coll.sources_all, mags, colors):
+    src.style.magnetization.color.middle = tuple(color)
+        
 fig = go.Figure()
 magpy.show(coll, canvas=fig)
 fig.update_layout(height=600)
 fig
+```
+
+```{code-cell} ipython3
+
 ```
