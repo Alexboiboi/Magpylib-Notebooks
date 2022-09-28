@@ -81,19 +81,21 @@ coll = apply_demag_with_refinement(
 
 ```{code-cell} ipython3
 from matplotlib import cm
+import plotly.graph_objects as go
+
+mag_linear_lim = 1100 # mT
 color_map = cm.get_cmap('viridis', 20)
 mags = np.linalg.norm([src.magnetization for src in coll.sources_all], axis=1)
-mags = (mags-min(mags))/ np.ptp(mags) # normalize
-colors = color_map(mags)
+mags_normed = (mags-min(mags))/ (mag_linear_lim-min(mags)) # normalize
+colors = color_map(mags_normed)
 for src,mag,color in zip(coll.sources_all, mags, colors):
-    src.style.magnetization.color.middle = tuple(color)
+    if mag>mag_linear_lim:
+        src.style.magnetization.color.middle = 'grey'
+    else:
+        src.style.magnetization.color.middle = tuple(color)
         
 fig = go.Figure()
 magpy.show(coll, canvas=fig)
 fig.update_layout(height=600)
 fig
-```
-
-```{code-cell} ipython3
-
 ```
