@@ -13,6 +13,8 @@ from loguru import logger
 from meshing_functions import mesh_Cuboid
 from scipy.spatial.transform import Rotation as R
 
+from magpylib.magnet import Cuboid
+
 config = {
     "handlers": [
         dict(
@@ -202,7 +204,7 @@ def demag_tensor(
                         H_unit_mag = np.concatenate(H_unit_mag, axis=0)
                 else:
                     H_unit_mag = magpy.getH(src_list, pos0)
-                H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
+            H_point.append(H_unit_mag)  # shape (n_cells, n_pos, 3_xyz)
 
     # shape (3_unit_mag, n_cells, n_pos, 3_xyz)
     T = np.array(H_point).reshape((3, n, n, 3))
@@ -219,7 +221,7 @@ def demag_tensor(
 def filter_distance(src_list, max_dist, return_params=False, return_base_geo=False):
     """filter indices by distance parameter"""
     with loguru_catchtime("Distance filter"):
-        all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+        all_cuboids = all(isinstance(src, Cuboid) for src in src_list)
         if not all_cuboids:
             raise ValueError(
                 "filter_distance only implemented if all sources are Cuboids"
@@ -260,7 +262,7 @@ def filter_distance(src_list, max_dist, return_params=False, return_base_geo=Fal
 def match_pairs(src_list):
     """match all pairs of sources from `src_list`"""
     with loguru_catchtime("Pairs matching"):
-        all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+        all_cuboids = all(isinstance(src, Cuboid) for src in src_list)
         if not all_cuboids:
             raise ValueError(
                 "Pairs matching only implemented if all sources are Cuboids"
@@ -519,7 +521,7 @@ def apply_demag(
 
     src_list = collection.sources_all
     n = len(src_list)
-    counts = Counter(s._object_type for s in src_list)
+    counts = Counter(s.__class__.__name__ for s in src_list)
     inplace_str = f"""{" (inplace) " if inplace else " "}"""
     demag_msg = (
         f"Demagnetization computation{inplace_str}of <blue>{collection}</blue>"
