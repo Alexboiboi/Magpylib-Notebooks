@@ -12,12 +12,12 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell}
+```{code-cell} ipython3
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 import ipywidgets as widgets
 import magpylib as magpy
 import matplotlib.pyplot as plt
@@ -33,7 +33,7 @@ magpy.defaults.display.backend = "plotly"
 
 # Setup
 
-```{code-cell}
+```{code-cell} ipython3
 # number of target mesh elements
 target_cells = 2
 
@@ -65,22 +65,18 @@ COLL0.show()
 
 # Demagnetization computation
 
-```{code-cell}
+```{code-cell} ipython3
 kwargs = dict(max_passes=8, refine_factor=2, max_dist=3, mag_diff_thresh=200)
-coll = apply_demag_with_refinement(
-    collection=COLL0,
-    inplace=False,
-    **kwargs,
-)
+coll = apply_demag_with_refinement(collection=COLL0, **kwargs)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 magpy.show(coll.sources_all, style_magnetization_show=False)
 ```
 
 # Compare demagnetization methods with FEM
 
-```{code-cell}
+```{code-cell} ipython3
 coll0 = COLL0.copy()
 coll0.style.label = "No demag"
 coll.style.label = f"elems={len(coll.sources_all)}, {kwargs}"
@@ -89,7 +85,7 @@ colls = [coll]
 #colls.append(coll0)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 B_cols = ["Bx [mT]", "By [mT]", "Bz [mT]"]
 
 
@@ -122,7 +118,7 @@ df = pd.concat(
 ).sort_values(["Source_type", "Distance [mm]"])
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 px_kwargs = dict(
     x="Distance [mm]",
     y=B_cols,

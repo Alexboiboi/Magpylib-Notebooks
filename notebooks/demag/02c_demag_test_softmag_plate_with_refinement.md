@@ -12,12 +12,12 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell}
+```{code-cell} ipython3
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 import magpylib as magpy
 import numpy as np
 import pandas as pd
@@ -64,11 +64,11 @@ sensors = [
 ]
 ```
 
-```{raw-cell}
+```{code-cell} ipython3
 magpy.show(*COLL0, sensors, style_magnetization_show=False)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 kwargs = dict(
     max_passes=10, init_refine_factor=100, refine_factor=8, max_dist=1, mag_diff_thresh=2000, max_elems=2000
 )
@@ -79,12 +79,12 @@ coll = apply_demag_with_refinement(
 )
 ```
 
-```{code-cell}
-from matplotlib import cm
+```{code-cell} ipython3
+from matplotlib import colormaps
 import plotly.graph_objects as go
 
 mag_linear_lim = 1100 # mT
-color_map = cm.get_cmap('viridis', 20)
+color_map = colormaps['viridis']
 mags = np.linalg.norm([src.magnetization for src in coll.sources_all], axis=1)
 mags_normed = (mags-min(mags))/ (mag_linear_lim-min(mags)) # normalize
 colors = color_map(mags_normed)
@@ -98,4 +98,8 @@ fig = go.Figure()
 magpy.show(coll, canvas=fig)
 fig.update_layout(height=600)
 fig
+```
+
+```{code-cell} ipython3
+
 ```

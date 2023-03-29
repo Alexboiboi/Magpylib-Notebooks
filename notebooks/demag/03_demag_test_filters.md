@@ -12,12 +12,12 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell}
+```{code-cell} ipython3
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 import ipywidgets as widgets
 import magpylib as magpy
 import matplotlib.pyplot as plt
@@ -59,7 +59,7 @@ sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 
 # Matching Interactions
 
-```{code-cell}
+```{code-cell} ipython3
 def show_matching_interactions(collection):
     src_list = collection.sources_all
     params, unique_inds, unique_inv_inds, pos0, rot0 = match_pairs(src_list)
@@ -129,7 +129,7 @@ show_matching_interactions(COLL0)
 
 # Filter distance
 
-```{code-cell}
+```{code-cell} ipython3
 def show_filter_distance(collection):
     src_list = collection.sources_all
     src_inds = np.array(np.meshgrid(range(len(src_list)), range(len(src_list)))).T.reshape(-1,2)[:,::-1]

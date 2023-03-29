@@ -381,7 +381,7 @@ def find_sources_to_refine2(src_list, mag_diff_thresh=10, max_dist=1):
 
 def apply_demag_with_refinement(
     collection,
-    inplace=True,
+    inplace=False,
     init_refine_factor=8,
     refine_factor=2,
     max_dist=2,
@@ -461,7 +461,7 @@ def apply_demag(
     solver="np.linalg.inv",
     demag_store=False,
     demag_load=False,
-    inplace=True,
+    inplace=False,
     pairs_matching=False,
     max_dist=0,
     split=1,

@@ -12,18 +12,19 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell}
+```{code-cell} ipython3
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 import magpylib as magpy
 import numpy as np
 import pandas as pd
 import plotly.express as px
 from demag_functions import apply_demag, apply_demag_with_refinement
 from meshing_functions import mesh_Cuboid
+magpy.defaults.display.backend = "plotly"
 
 elems = 200  # mesh factor
 
@@ -41,7 +42,7 @@ cube2.rotate_from_angax(angle=45, axis="y", anchor=None).move((1.5, 0, 0))
 cube2.xi = 3999
 
 # super collection
-COLL0 = cube1 + cube2
+coll0 = cube1 + cube2
 #magpy.show(cube1, cube2, sensors)
 
 # add sensors
@@ -53,20 +54,20 @@ sensors = [
 ]
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 kwargs = dict(max_passes=8, refine_factor=2, max_dist=2, mag_diff_thresh=100, max_elems=None)
 coll = apply_demag_with_refinement(
-    collection=COLL0,
+    collection=coll0,
     inplace=False,
     **kwargs,
 )
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 magpy.show(coll.sources_all, style_magnetization_show=False)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 def read_FEM_data(file, source_type):
     df0 = pd.read_csv(file, delimiter=",")
     df_list = []
@@ -100,13 +101,13 @@ df = pd.concat(
     [
         read_FEM_data("FEMdata_test_softmag_coarse.csv", "FEM-coarse"),
         read_FEM_data("FEMdata_test_softmag_fine.csv", "FEM-fine"),
-        get_magpylib_data(COLL0, "Magpylib-No-Demag"),
+        get_magpylib_data(coll0, "Magpylib-No-Demag"),
         get_magpylib_data(coll, "Magpylib-With-Demag"),
     ]
 )
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 fig = px.line(
     df,
     x="Distance [mm]",
@@ -121,7 +122,7 @@ fig = px.line(
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 ref = "FEM-fine"
 dff = df.sort_values(["Source_type", "Sensor_num", "Distance [mm]"])
 for st in dff["Source_type"].unique():
@@ -141,4 +142,8 @@ fig = px.line(
     title=f'Magpylib & Magpylib+Demag (diff vs {ref})',
 )
 fig.update_yaxes(matches=None, showticklabels=True)
+```
+
+```{code-cell} ipython3
+
 ```

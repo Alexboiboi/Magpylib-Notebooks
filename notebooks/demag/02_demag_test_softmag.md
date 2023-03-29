@@ -12,13 +12,14 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell}
+```{code-cell} ipython3
 import magpylib as magpy
 import numpy as np
 import pandas as pd
 import plotly.express as px
 from demag_functions import apply_demag
 from meshing_functions import mesh_Cuboid
+magpy.defaults.display.backend = "plotly"
 
 elems = 200  # mesh factor
 
@@ -26,16 +27,16 @@ elems = 200  # mesh factor
 mag1 = (0, 0, 1000)
 dim1 = (1, 1, 2)
 cube1 = magpy.magnet.Cuboid(mag1, dim1, (0, 0, 0.5))
-col1 = mesh_Cuboid(cube1, elems)
-col1.xi = 0.5
+coll1 = mesh_Cuboid(cube1, elems)
+coll1.xi = 0.5
 
 # soft magnet
 mag2 = (0, 0, 0)
 dim2 = (1, 1, 1)
 cube2 = magpy.magnet.Cuboid(mag2, dim2, (0, 0, 0))
 cube2.rotate_from_angax(angle=45, axis="y", anchor=None).move((1.5, 0, 0))
-col2 = mesh_Cuboid(cube2, elems)
-col2.xi = 3999
+coll2 = mesh_Cuboid(cube2, elems)
+coll2.xi = 3999
 
 # super collection
 COL0 = cube1 + cube2
@@ -45,21 +46,22 @@ COL0 = cube1 + cube2
 sensors = [
     magpy.Sensor(
         position=np.linspace((-4, 0, z), (6, 0, z), 1001),
+        style_label=f"Sensor {i}"
     )
-    for z in [-1, -3, -5]
+    for i,z in enumerate([-1, -3, -5])
 ]
 
 # apply demag
-COL1 = col1 + col2
+coll = coll1 + coll2
 
-apply_demag(COL1, demag_store=False, demag_load=False)
+apply_demag(coll, demag_store=False, demag_load=False, inplace=True)
 
 
 print("\nAfter demagnetization:")
-magpy.show(*COL1, sensors)
+magpy.show(coll1, sensors)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 def read_FEM_data(file, source_type):
     df0 = pd.read_csv(file, delimiter=",")
     df_list = []
@@ -94,12 +96,12 @@ df = pd.concat(
         read_FEM_data("FEMdata_test_softmag_coarse.csv", "FEM-coarse"),
         read_FEM_data("FEMdata_test_softmag_fine.csv", "FEM-fine"),
         get_magpylib_data(COL0, "Magpylib-No-Demag"),
-        get_magpylib_data(COL1, "Magpylib-With-Demag"),
+        get_magpylib_data(coll1, "Magpylib-With-Demag"),
     ]
 )
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 fig = px.line(
     df,
     x="Distance [mm]",
@@ -113,7 +115,7 @@ fig = px.line(
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
 
-```{code-cell}
+```{code-cell} ipython3
 dff = df.sort_values(["Source_type", "Sensor_num", "Distance [mm]"])
 for st in dff["Source_type"].unique():
     cols = ["Bx [mT]", "Bz [mT]"]

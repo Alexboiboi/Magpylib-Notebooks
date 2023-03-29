@@ -55,7 +55,7 @@ coll3.move((1.6, 0, 0.5)).rotate_from_angax(30, "z")
 coll3.xi = 0.5  # mu3=1.5
 
 # collection of all cells
-COLL0 = magpy.Collection(coll1, coll2, coll3)
+coll = magpy.Collection(coll1, coll2, coll3)
 
 # sensor
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
@@ -63,19 +63,14 @@ sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 # compute field before demag
 B0 = sensor.getB(COLL0)
 
-COLL0.show()
+coll.show()
 ```
 
 # Demagnetization computation
 
 ```{code-cell} ipython3
 # apply demag
-
-kwargs = dict(collection=COLL0, inplace=False)
-
-colls = []
-
-colls.append(apply_demag(**kwargs, style={"label": "Full demag"}))
+colls = [apply_demag(coll, style={"label": "Full demag"})]
 ```
 
 ```{code-cell} ipython3
