@@ -5,19 +5,19 @@ jupytext:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.7
+    jupytext_version: 1.14.5
 kernelspec:
   display_name: Python 3 (ipykernel)
   language: python
   name: python3
 ---
 
-```{code-cell} ipython3
+```{code-cell}
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 import ipywidgets as widgets
 import magpylib as magpy
 import matplotlib.pyplot as plt
@@ -57,11 +57,9 @@ COLL0 = magpy.Collection(coll1, coll2, coll3)
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 ```
 
-+++ {"tags": []}
-
 # Matching Interactions
 
-```{code-cell} ipython3
+```{code-cell}
 def show_matching_interactions(collection):
     src_list = collection.sources_all
     params, unique_inds, unique_inv_inds, pos0, rot0 = match_pairs(src_list)
@@ -131,7 +129,7 @@ show_matching_interactions(COLL0)
 
 # Filter distance
 
-```{code-cell} ipython3
+```{code-cell}
 def show_filter_distance(collection):
     src_list = collection.sources_all
     src_inds = np.array(np.meshgrid(range(len(src_list)), range(len(src_list)))).T.reshape(-1,2)[:,::-1]

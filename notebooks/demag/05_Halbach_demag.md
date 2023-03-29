@@ -12,12 +12,12 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell} ipython3
+```{code-cell}
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 import glob
 import os
 import pickle
@@ -59,7 +59,7 @@ ANSYS_file_params = {
 magpy.defaults.display.backend = "plotly"
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 class HalbachCylinder(magpy.Collection):
     def __init__(self, num_of_mags=16, **kwargs):
         super().__init__()
@@ -129,7 +129,7 @@ class HalbachCylinder(magpy.Collection):
             magnet.magnetization = np.array([Brem, 0.0, 0.0])
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 def create_pill_grid(dist, rows=1, cols=1, recenter=False):
     pos = []
     for r in range(rows):
@@ -274,7 +274,7 @@ def show_residuals(datasets):
     display(widgets.HBox([w, fig_box]))
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 def create_meshed_Halbach(
     *,
     shield_mesh_mode,
@@ -326,7 +326,7 @@ def create_demag_Halbach(
     return hc_with_shield_meshed
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 def create_FEM_dataset(folder, name=None):
     if name is None:
         name = str(folder)
@@ -347,7 +347,7 @@ def create_FEM_dataset(folder, name=None):
     return dset
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 folder = "data/two_pills_with_shield/singlelayer_fine"
 
 datasets = []
@@ -404,11 +404,11 @@ for d in datasets:
     d.pill_distance = 75
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 magpy.show(datasets[-1][0])
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 datasets[-1]
 ```
 
@@ -420,7 +420,7 @@ with open('demag_hb00.pickle', 'wb') as handle:
     pickle.dump(datasets[1], handle, protocol=pickle.HIGHEST_PROTOCOL)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 display(out)
 show_Bxyz(datasets)
 # show_Bxyz(datasets, reference='1Pill_FEM+interpolated_rotation')

@@ -5,14 +5,14 @@ jupytext:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.7
+    jupytext_version: 1.14.5
 kernelspec:
   display_name: Python 3 (ipykernel)
   language: python
   name: python3
 ---
 
-```{code-cell} ipython3
+```{code-cell}
 import magpylib as magpy
 import numpy as np
 import pandas as pd
@@ -59,7 +59,7 @@ print("\nAfter demagnetization:")
 magpy.show(*COL1, sensors)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 def read_FEM_data(file, source_type):
     df0 = pd.read_csv(file, delimiter=",")
     df_list = []
@@ -99,7 +99,7 @@ df = pd.concat(
 )
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 fig = px.line(
     df,
     x="Distance [mm]",
@@ -113,7 +113,7 @@ fig = px.line(
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 dff = df.sort_values(["Source_type", "Sensor_num", "Distance [mm]"])
 for st in dff["Source_type"].unique():
     cols = ["Bx [mT]", "Bz [mT]"]

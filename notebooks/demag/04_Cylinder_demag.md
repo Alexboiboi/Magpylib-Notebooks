@@ -12,7 +12,7 @@ kernelspec:
   name: python3
 ---
 
-```{code-cell} ipython3
+```{code-cell}
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -47,7 +47,7 @@ h=9
 sens = magpy.Sensor().move(np.linspace((-2,0,h),(2,0,h),50), start=0)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 B_list = [magpy.getB(cyl, sens, output='dataframe')]
 for elems in [10, 300]:#, 20, 50, 100, 200, 300]:
     cyl_mesh = create_meshed_cylinder(elems=elems)
@@ -56,15 +56,15 @@ for elems in [10, 300]:#, 20, 50, 100, 200, 300]:
 B = pd.concat(B_list)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 magpy.show(cyl_mesh, sens)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 B['Bmag'] = (B['Bx']**2 + B['By']**2 + B['Bz']**2)**0.5
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 fig = px.line(B, color='source', x='path', y=['Bx','By', 'Bz', 'Bmag'], facet_col='variable')
 fig.update_yaxes(matches=None, showticklabels=True)
 ```

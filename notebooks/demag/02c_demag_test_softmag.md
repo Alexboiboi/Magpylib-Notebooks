@@ -5,19 +5,19 @@ jupytext:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.7
+    jupytext_version: 1.14.5
 kernelspec:
   display_name: Python 3 (ipykernel)
   language: python
   name: python3
 ---
 
-```{code-cell} ipython3
+```{code-cell}
 %load_ext autoreload
 %autoreload 2
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 import magpylib as magpy
 import numpy as np
 import pandas as pd
@@ -68,7 +68,7 @@ sensors = [
 magpy.show(*COLL0, sensors, style_magnetization_show=False)
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 kwargs = dict(
     max_passes=10, init_refine_factor=100, refine_factor=8, max_dist=1, mag_diff_thresh=2000, max_elems=2000
 )
@@ -79,7 +79,7 @@ coll = apply_demag_with_refinement(
 )
 ```
 
-```{code-cell} ipython3
+```{code-cell}
 from matplotlib import cm
 import plotly.graph_objects as go
 
