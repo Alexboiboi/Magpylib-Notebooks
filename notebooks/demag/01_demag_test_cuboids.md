@@ -1,11 +1,11 @@
 ---
 jupytext:
-  formats: md:myst,ipynb
+  formats: md:myst
   text_representation:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.7
+    jupytext_version: 1.14.5
 kernelspec:
   display_name: Python 3 (ipykernel)
   language: python
@@ -65,8 +65,6 @@ B0 = sensor.getB(COLL0)
 
 COLL0.show()
 ```
-
-+++ {"tags": []}
 
 # Demagnetization computation
 
