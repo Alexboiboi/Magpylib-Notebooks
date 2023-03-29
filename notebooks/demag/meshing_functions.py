@@ -1,12 +1,9 @@
-# +
 from itertools import product
 
 import magpylib as magpy
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-
-# -
 
 def apportion_triple(triple, min_val=1, max_iter=30):
     """Apportion values of a triple, so that the minimum value `min_val` is respected
@@ -257,19 +254,19 @@ def get_volume(obj, return_containing_cube_edge=False):
     """Return object volume in mm^3. The `containting_cube_edge` is the mininum side length of an
     unrotated cube centered at the origin containing the object.
     """
-    if obj._object_type == "Cuboid":
+    if obj.__class__.__name__ == "Cuboid":
         dim = obj.dimension
         vol = dim[0] * dim[1] * dim[2]
         containing_cube_edge = max(obj.dimension)
-    elif obj._object_type == "Cylinder":
+    elif obj.__class__.__name__ == "Cylinder":
         d, h = obj.dimension
         vol = h * np.pi * (d / 2) ** 2
         containing_cube_edge = max(d, h)
-    elif obj._object_type == "CylinderSegment":
+    elif obj.__class__.__name__ == "CylinderSegment":
         r1, r2, h, phi1, phi2 = obj.dimension
         vol = h * np.pi * (r2**2 - r1**2) * (phi2 - phi1) / 360
         containing_cube_edge = max(h, 2 * r2)
-    elif obj._object_type == "Sphere":
+    elif obj.__class__.__name__ == "Sphere":
         vol = 4 / 3 * np.pi * (obj.diameter / 2) ** 3
         containing_cube_edge = obj.diameter
     else:
@@ -364,7 +361,7 @@ def mask_inside(obj, positions, tolerance=1e-14):
         "Sphere": mask_inside_Sphere,
         "CylinderSegment": mask_inside_CylinderSegment,
     }
-    func = mask_inside_funcs.get(obj._object_type, None)
+    func = mask_inside_funcs.get(obj.__class__.__name__, None)
     if func is None:
         raise TypeError("Unsupported object type for inside masking")
     return func(obj, positions, tolerance)
