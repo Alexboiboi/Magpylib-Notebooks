@@ -542,11 +542,11 @@ def apply_demag(
     )
     with loguru_catchtime(demag_msg):
         # set up mr
-        mag = [
+        mag_magnets = [
             src.orientation.apply(src.magnetization) for src in magnets_list
         ]  # ROTATION CHECK
-        mag = np.reshape(
-            mag, (3 * n, 1), order="F"
+        mag_magnets = np.reshape(
+            mag_magnets, (3 * n, 1), order="F"
         )  # shape ii = x1, ... xn, y1, ... yn, z1, ... zn
 
         # set up S
@@ -570,20 +570,22 @@ def apply_demag(
                 max_dist=max_dist,
             )
 
-        T = T * (4 * np.pi / 10)
-        T = T.swapaxes(2, 3)
-        T = np.reshape(T, (3 * n, 3 * n)).T  # shape ii, jj
+        T *= 4 * np.pi / 10
+        T = T.swapaxes(2, 3).reshape((3 * n, 3 * n)).T  # shape ii, jj
 
         # Incorporate the magnetic field contributions from current sources
         pos = np.array([src.position for src in magnets_list])
         mag_currents = magpy.getH(currents_list, pos)
         mag_currents = np.reshape(mag_currents, (3 * n, 1), order="F")
+        mag_tolal = mag_magnets + np.matmul(S, mag_currents)
 
         # set up Q
         Q = np.eye(3 * n) - np.matmul(S, T)
 
-        with loguru_catchtime("Solving of linear system"):
-            mag_new = np.linalg.solve(Q, mag + np.matmul(S, mag_currents))
+        # determine new magnetization vectors
+        with loguru_catchtime("Solving of linear system", min_log_time=0):
+            mag_new = np.linalg.solve(Q, mag_tolal)
+
 
         mag_new = np.reshape(mag_new, (n, 3), order="F")
         # mag_new *= .4*np.pi
