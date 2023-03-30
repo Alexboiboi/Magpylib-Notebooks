@@ -14,6 +14,7 @@ from meshing_functions import mesh_Cuboid
 from scipy.spatial.transform import Rotation as R
 
 from magpylib.magnet import Cuboid
+from magpylib._src.obj_classes.class_BaseExcitations import BaseMagnet, BaseCurrent
 
 config = {
     "handlers": [
@@ -396,7 +397,7 @@ def apply_demag_with_refinement(
         coll = collection
 
     # make initial refinement
-    if init_refine_factor>1:
+    if init_refine_factor > 1:
         refine(*coll.sources_all, factor=init_refine_factor)
 
     # initialize
@@ -518,10 +519,22 @@ def apply_demag(
         collection = collection.copy()
     if style is not None:
         collection.style = style
-
-    src_list = collection.sources_all
-    n = len(src_list)
-    counts = Counter(s.__class__.__name__ for s in src_list)
+    srcs = collection.sources_all
+    magnets_list = [src for src in srcs if isinstance(src, BaseMagnet)]
+    currents_list = [src for src in srcs if isinstance(src, BaseCurrent)]
+    others_list = [
+        src
+        for src in srcs
+        if not isinstance(src, (BaseMagnet, BaseCurrent, magpy.Sensor))
+    ]
+    if others_list:
+        raise TypeError(
+            "Only Magnet and Current sources supported. "
+            "Incompatible objects found: "
+            f"{Counter(s.__class__.__name__ for s in others_list)}"
+        )
+    n = len(magnets_list)
+    counts = Counter(s.__class__.__name__ for s in magnets_list)
     inplace_str = f"""{" (inplace) " if inplace else " "}"""
     demag_msg = (
         f"Demagnetization computation{inplace_str}of <blue>{collection}</blue>"
@@ -530,7 +543,7 @@ def apply_demag(
     with loguru_catchtime(demag_msg):
         # set up mr
         mag = [
-            src.orientation.apply(src.magnetization) for src in src_list
+            src.orientation.apply(src.magnetization) for src in magnets_list
         ]  # ROTATION CHECK
         mag = np.reshape(
             mag, (3 * n, 1), order="F"
@@ -538,7 +551,7 @@ def apply_demag(
 
         # set up S
         if xi is None:
-            xi = get_xi(*src_list)
+            xi = get_xi(*magnets_list)
         xi = np.array(xi)
         if len(xi) != n:
             raise ValueError(
@@ -549,24 +562,29 @@ def apply_demag(
         # set up T (3 mag unit, n cells, n positions, 3 Bxyz)
         with loguru_catchtime("Demagnetization tensor calculation"):
             T = demag_tensor(
-                src_list,
+                magnets_list,
                 store=demag_store,
                 load=demag_load,
                 split=split,
                 pairs_matching=pairs_matching,
                 max_dist=max_dist,
             )
-        # T = T.swapaxes(0, 3)
+
         T = T * (4 * np.pi / 10)
         T = T.swapaxes(2, 3)
         T = np.reshape(T, (3 * n, 3 * n)).T  # shape ii, jj
 
-        # set up and invert Q
-        Q = np.eye(3 * n) - np.matmul(S, T)
-        Q_inv = invert(quat=Q, solver=solver)
+        # Incorporate the magnetic field contributions from current sources
+        pos = np.array([src.position for src in magnets_list])
+        mag_currents = magpy.getH(currents_list, pos)
+        mag_currents = np.reshape(mag_currents, (3 * n, 1), order="F")
 
-        # determine new magnetization vectors
-        mag_new = np.matmul(Q_inv, mag)
+        # set up Q
+        Q = np.eye(3 * n) - np.matmul(S, T)
+
+        with loguru_catchtime("Solving of linear system"):
+            mag_new = np.linalg.solve(Q, mag + np.matmul(S, mag_currents))
+
         mag_new = np.reshape(mag_new, (n, 3), order="F")
         # mag_new *= .4*np.pi
 
