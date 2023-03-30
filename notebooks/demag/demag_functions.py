@@ -304,7 +304,6 @@ def match_pairs(src_list):
     return params, unique_inds, unique_inv_inds, pos0, rot0
 
 
-
 def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
     """Return a set of sources from `src_list` which meet following criteria for refinement:"
     - relative-to-dimension pair of sources < `max_dist`
@@ -320,7 +319,8 @@ def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
     mag0 = [src.magnetization for src in src_list]
     magr0 = rot0.apply(mag0)
     mag2 = np.tile(magr0, (len_src, 1)) - np.repeat(magr0, len_src, axis=0)
-    mag_mask = np.linalg.norm(np.abs(mag2), axis=1) > mag_diff_thresh
+    norm = np.linalg.norm(np.abs(mag2), axis=1)
+    mag_mask = norm > mag_diff_thresh
     full_mask = dist_mask & mag_mask
     srcs_to_refine = set(src_tile[full_mask]).intersection(src_repeat[full_mask])
     return srcs_to_refine
@@ -371,8 +371,10 @@ def apply_demag_with_refinement(
 
     # make initial refinement
     if init_refine_factor > 1:
-        refine(*coll.sources_all, factor=init_refine_factor)
-
+        srcs_to_refine = [
+            src for src in coll.sources_all if isinstance(src, BaseMagnet)
+        ]
+        refine(*srcs_to_refine, factor=init_refine_factor)
     # initialize
     pass_num = 0
     srcs_to_refine = True
@@ -383,7 +385,7 @@ def apply_demag_with_refinement(
         logger.opt(colors=True).info(
             f"Adaptive pass <blue>{pass_num} (max={max_passes})</blue>"
         )
-        src_list = coll.sources_all
+        src_list = [src for src in coll.sources_all if isinstance(src, BaseMagnet)]
         # store magnetizations before applying demag, to start next iteration with
         # correct magnetizations
         mags_before_demag = np.array([src._magnetization for src in src_list])
@@ -416,16 +418,20 @@ def apply_demag_with_refinement(
         return coll
 
 
-def refine(*sources, factor, mode="cuboids"):
+def refine(*sources, factor):
     """refine sources and replace them inplace with a meshed collection"""
-    if mode != "cuboids":
-        raise ValueError("Refinement only supports 'cuboids' mode")
     for src in sources:
+        if not isinstance(src, magpy.magnet.Cuboid):
+            raise TypeError(
+                "Refinement only supports Cuboids at the moment. "
+                f"Received {src.__class__.__name__} instead"
+            )
         parent = src.parent
+        xi = get_xi(src)[0]
         src.parent = None
         meshed_coll = mesh_Cuboid(src, factor)
         for child in meshed_coll:
-            child.xi = src.xi
+            child.xi = xi
         parent.add(meshed_coll)
 
 
@@ -554,7 +560,6 @@ def apply_demag(
         # determine new magnetization vectors
         with loguru_catchtime("Solving of linear system", min_log_time=0):
             mag_new = np.linalg.solve(Q, mag_tolal)
-
 
         mag_new = np.reshape(mag_new, (n, 3), order="F")
         # mag_new *= .4*np.pi
