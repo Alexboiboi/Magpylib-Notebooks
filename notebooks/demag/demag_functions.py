@@ -304,33 +304,6 @@ def match_pairs(src_list):
     return params, unique_inds, unique_inv_inds, pos0, rot0
 
 
-def invert(quat, solver):
-    """
-    quat inversion
-
-    Parameters
-    ----------
-    quat: np.array, shape (n,n)
-        Input quat to be inverted.
-
-    solver: str
-        Solver to be used. Must be one of (np.linalg.inv, ).
-
-    Returns
-    -------
-    quat_inverse: ndarray, shape (n,n)
-
-
-    TODO implement and test different solver packages
-    TODO check input quat and auto-select correct solver (direct, iterative, ...)
-    """
-    with loguru_catchtime(f"Matrix inversion with <blue>{solver}</blue>"):
-        if solver == "np.linalg.inv":
-            res = np.linalg.inv(quat)
-            return res
-
-    raise ValueError("Bad solver input.")
-
 
 def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
     """Return a set of sources from `src_list` which meet following criteria for refinement:"
@@ -459,7 +432,6 @@ def refine(*sources, factor, mode="cuboids"):
 def apply_demag(
     collection,
     xi=None,
-    solver="np.linalg.inv",
     demag_store=False,
     demag_load=False,
     inplace=False,
@@ -479,9 +451,6 @@ def apply_demag(
     xi: array_like, shape (n,)
         Vector of n magnetic susceptibilities of the cells. If not defined, values are searched at
         object level or parent level if needed.
-
-    solver: str, default='np.linalg.inv'
-        Solver to be used. Must be one of (np.linalg.inv, ).
 
     demag_store: `False` or filename (str)
         Store demagnetization tensor T after computation as filename.npy.
