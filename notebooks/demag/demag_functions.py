@@ -409,7 +409,8 @@ def apply_demag_with_refinement(
             else:
                 a, b = len(srcs_to_refine), len(src_list)
                 logger.opt(colors=True).success(
-                    f" Sources refined : <blue>{len(srcs_to_refine)}/{len(src_list)} ({a/b*100:.2f}%)</blue>"
+                    f" Sources refined : <blue>{len(srcs_to_refine)}/{len(src_list)} "
+                    f"({a/b*100:.2f}%)</blue>"
                 )
                 for src, mag in zip(src_list, mags_before_demag):
                     src._magnetization = mag
@@ -545,20 +546,26 @@ def apply_demag(
                 max_dist=max_dist,
             )
 
-        T *= 4 * np.pi / 10
-        T = T.swapaxes(2, 3).reshape((3 * n, 3 * n)).T  # shape ii, jj
+            T *= 4 * np.pi / 10
+            T = T.swapaxes(2, 3).reshape((3 * n, 3 * n)).T  # shape ii, jj
 
-        # Incorporate the magnetic field contributions from current sources
-        pos = np.array([src.position for src in magnets_list])
-        mag_currents = magpy.getH(currents_list, pos)
-        mag_currents = np.reshape(mag_currents, (3 * n, 1), order="F")
-        mag_tolal = mag_magnets + np.matmul(S, mag_currents)
+        mag_tolal = mag_magnets
+
+        if currents_list:
+            with loguru_catchtime(
+                "Incorporate magnetic field contributions from current sources",
+                min_log_time=1,
+            ):
+                pos = np.array([src.position for src in magnets_list])
+                mag_currents = magpy.getH(currents_list, pos, sumup=True)
+                mag_currents = np.reshape(mag_currents, (3 * n, 1), order="F")
+                mag_tolal += np.matmul(S, mag_currents)
 
         # set up Q
         Q = np.eye(3 * n) - np.matmul(S, T)
 
         # determine new magnetization vectors
-        with loguru_catchtime("Solving of linear system", min_log_time=0):
+        with loguru_catchtime("Solving of linear system", min_log_time=1):
             mag_new = np.linalg.solve(Q, mag_tolal)
 
         mag_new = np.reshape(mag_new, (n, 3), order="F")
