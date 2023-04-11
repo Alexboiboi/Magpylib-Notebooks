@@ -476,3 +476,54 @@ def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_lim
     col.orientation = cyl_seg.orientation
     col.position = cyl_seg.position
     return col
+
+
+def slice_Cuboid(cuboid, shift=0.5, axis='z', **kwargs):
+    """
+    Slice a cuboid magnet along a specified axis and return a collection of the resulting parts.
+
+    Parameters
+    ----------
+    cuboid : magpy.magnet.Cuboid
+        The cuboid to be sliced.
+    shift : float, optional, default=0.5
+        The relative position of the slice along the specified axis, ranging from
+        0 to 1 (exclusive).
+    axis : {'x', 'y', 'z'}, optional, default='z'
+        The axis along which to slice the cuboid.
+    **kwargs
+        Additional keyword arguments to pass to the magpy.Collection constructor.
+
+    Returns
+    -------
+    coll : magpy.Collection
+        A collection of the resulting parts after slicing the cuboid.
+
+    Raises
+    ------
+    ValueError
+        If the shift value is not between 0 and 1 (exclusive).
+    """
+    if not 0<shift<1:
+        raise ValueError("Shift must be between 0 and 1 (exclusive)")
+    dim0 = cuboid.dimension
+    mag0 = cuboid.magnetization
+    xi = getattr(magpy, "xi", None)
+    ind = "xyz".index(axis)
+    dim_k = cuboid.dimension[ind]
+    dims_k = dim_k*(1-shift), dim_k*(shift)
+    shift_k = (dim_k - dims_k[0]) / 2, - (dim_k - dims_k[1]) / 2
+    children = []
+    for d, s in zip(dims_k, shift_k):
+        dimension = dim0.copy()
+        dimension[ind] = d
+        position = np.array([0,0,0], dtype=float)
+        position[ind] = s
+        child = magpy.magnet.Cuboid(magnetization=mag0, dimension=dimension, position=position)
+        if xi is not None:
+            child.xi = xi
+        children.append(child)
+    coll = magpy.Collection(children, **kwargs)
+    coll.orientation = cuboid.orientation
+    coll.position = cuboid.position
+    return coll
