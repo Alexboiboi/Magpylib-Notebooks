@@ -4,7 +4,7 @@ import warnings
 def find_circle_center_and_tangent_points(a, b, c, r, max_ratio=1):
     """
     Find the center of a circle and its tangent points with given vertices and radius.
-    
+
     Parameters
     ----------
     a, b, c : array-like
@@ -13,7 +13,7 @@ def find_circle_center_and_tangent_points(a, b, c, r, max_ratio=1):
         Radius of the circle.
     max_ratio : float, optional, default: 0.5
         Maximum allowed ratio of the distance to the tangent point relative to the length of the triangle sides.
-    
+
     Returns
     -------
     tuple
@@ -51,7 +51,7 @@ def find_circle_center_and_tangent_points(a, b, c, r, max_ratio=1):
 def interpolate_circle(center, start, end, n_points):
     """
     Interpolate points along a circle arc between two points.
-    
+
     Parameters
     ----------
     center : array-like
@@ -60,7 +60,7 @@ def interpolate_circle(center, start, end, n_points):
         Start and end points of the arc with shape (2,) or (3,).
     n_points : int
         Number of points to interpolate.
-    
+
     Returns
     -------
     list
@@ -83,7 +83,7 @@ def interpolate_circle(center, start, end, n_points):
 def create_fillet_segment(a, b, c, r, N):
     """
     Create a fillet segment with a given radius between three vertices.
-    
+
     Parameters
     ----------
     a, b, c : array-like
@@ -92,7 +92,7 @@ def create_fillet_segment(a, b, c, r, N):
         Radius of the fillet.
     N : int
         Number of points to interpolate along the fillet.
-    
+
     Returns
     -------
     list
@@ -108,7 +108,7 @@ def create_fillet_segment(a, b, c, r, N):
 def create_polyline_fillet(polyline, max_radius, N):
     """
     Create a filleted polyline with specified maximum radius and number of points.
-    
+
     Parameters
     ----------
     polyline : list or array-like
@@ -117,7 +117,7 @@ def create_polyline_fillet(polyline, max_radius, N):
         Maximum radius of the fillet.
     N : int
         Number of points to interpolate along the fillet.
-    
+
     Returns
     -------
     numpy.ndarray
