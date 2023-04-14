@@ -557,7 +557,7 @@ def apply_demag(
                 min_log_time=1,
             ):
                 pos = np.array([src.position for src in magnets_list])
-                mag_currents = magpy.getH(currents_list, pos, sumup=True)
+                mag_currents = magpy.getB(currents_list, pos, sumup=True)
                 mag_currents = np.reshape(mag_currents, (3 * n, 1), order="F")
                 mag_tolal += np.matmul(S, mag_currents)
 
