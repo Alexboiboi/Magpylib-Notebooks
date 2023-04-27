@@ -61,7 +61,7 @@ coll = magpy.Collection(coll1, coll2, coll3)
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 
 # compute field before demag
-B0 = sensor.getB(COLL0)
+B0 = sensor.getB(coll)
 
 coll.show()
 ```
@@ -143,4 +143,8 @@ fig2 = px.line(
 )
 fig2.update_yaxes(matches=None, showticklabels=True)
 display(fig1, fig2)
+```
+
+```{code-cell} ipython3
+
 ```
