@@ -13,11 +13,16 @@ kernelspec:
 ---
 
 ```{code-cell} ipython3
+%load_ext autoreload
+%autoreload 2
+```
+
+```{code-cell} ipython3
 import magpylib as magpy
 import numpy as np
 import pandas as pd
 import plotly.express as px
-from demag_functions import apply_demag
+from demag_functions import apply_demag, apply_demag_with_refinement
 from meshing_functions import mesh_Cuboid
 magpy.defaults.display.backend = "plotly"
 
@@ -27,38 +32,39 @@ elems = 200  # mesh factor
 mag1 = (0, 0, 1000)
 dim1 = (1, 1, 2)
 cube1 = magpy.magnet.Cuboid(mag1, dim1, (0, 0, 0.5))
-coll1 = mesh_Cuboid(cube1, elems)
-coll1.xi = 0.5
+cube1.xi = 0.5
 
 # soft magnet
 mag2 = (0, 0, 0)
 dim2 = (1, 1, 1)
 cube2 = magpy.magnet.Cuboid(mag2, dim2, (0, 0, 0))
 cube2.rotate_from_angax(angle=45, axis="y", anchor=None).move((1.5, 0, 0))
-coll2 = mesh_Cuboid(cube2, elems)
-coll2.xi = 3999
+cube2.xi = 3999
 
 # super collection
-COL0 = cube1 + cube2
+coll0 = cube1 + cube2
 #magpy.show(cube1, cube2, sensors)
 
 # add sensors
 sensors = [
     magpy.Sensor(
         position=np.linspace((-4, 0, z), (6, 0, z), 1001),
-        style_label=f"Sensor {i}"
     )
-    for i,z in enumerate([-1, -3, -5])
+    for z in [-1, -3, -5]
 ]
+```
 
-# apply demag
-coll = coll1 + coll2
+```{code-cell} ipython3
+kwargs = dict(max_passes=8, refine_factor=2, max_dist=2, mag_diff_thresh=100, max_elems=None)
+coll = apply_demag_with_refinement(
+    collection=coll0,
+    inplace=False,
+    **kwargs,
+)
+```
 
-apply_demag(coll, demag_store=False, demag_load=False, inplace=True)
-
-
-print("\nAfter demagnetization:")
-magpy.show(coll1, sensors)
+```{code-cell} ipython3
+magpy.show(coll.sources_all, style_magnetization_show=False)
 ```
 
 ```{code-cell} ipython3
@@ -95,8 +101,8 @@ df = pd.concat(
     [
         read_FEM_data("FEMdata_test_softmag_coarse.csv", "FEM-coarse"),
         read_FEM_data("FEMdata_test_softmag_fine.csv", "FEM-fine"),
-        get_magpylib_data(COL0, "Magpylib-No-Demag"),
-        get_magpylib_data(coll1, "Magpylib-With-Demag"),
+        get_magpylib_data(coll0, "Magpylib-No-Demag"),
+        get_magpylib_data(coll, "Magpylib-With-Demag"),
     ]
 )
 ```
@@ -112,15 +118,17 @@ fig = px.line(
     height=600,
     title='FEM vs Magpylib vs Magpylib+Demag',
 )
+
 fig.update_yaxes(matches=None, showticklabels=True)
 ```
 
 ```{code-cell} ipython3
+ref = "FEM-fine"
 dff = df.sort_values(["Source_type", "Sensor_num", "Distance [mm]"])
 for st in dff["Source_type"].unique():
     cols = ["Bx [mT]", "Bz [mT]"]
     dff.loc[dff["Source_type"] == st, cols] -= df.loc[
-        df["Source_type"] == "FEM-fine", cols
+        df["Source_type"] == ref, cols
     ].values
 
 fig = px.line(
@@ -131,7 +139,11 @@ fig = px.line(
     facet_row="variable",
     color="Source_type",
     height=600,
-    title='Magpylib & Magpylib+Demag (diff vs FEM-fine)',
+    title=f'Magpylib & Magpylib+Demag (diff vs {ref})',
 )
 fig.update_yaxes(matches=None, showticklabels=True)
+```
+
+```{code-cell} ipython3
+
 ```

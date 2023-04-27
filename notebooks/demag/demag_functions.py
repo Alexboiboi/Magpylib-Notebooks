@@ -1,16 +1,20 @@
 """demag_functions"""
 # +
 # pylint: disable=invalid-name, redefined-outer-name, protected-access
-
 import sys
-from time import perf_counter
+import threading
 from collections import Counter
 from contextlib import contextmanager
+import time
 
-from loguru import logger
-import numpy as np
-from scipy.spatial.transform import Rotation as R
 import magpylib as magpy
+import numpy as np
+from loguru import logger
+from meshing_functions import mesh_Cuboid
+from scipy.spatial.transform import Rotation as R
+
+from magpylib.magnet import Cuboid
+from magpylib._src.obj_classes.class_BaseExcitations import BaseMagnet, BaseCurrent
 
 config = {
     "handlers": [
@@ -28,16 +32,54 @@ config = {
 }
 logger.configure(**config)
 
+
+class ElapsedTimeThread(threading.Thread):
+    """ "Stoppable thread that logs the time elapsed"""
+
+    def __init__(self, msg=None, min_log_time=1):
+        super(ElapsedTimeThread, self).__init__()
+        self._stop_event = threading.Event()
+        self.thread_start = time.time()
+        self.msg = msg
+        self.min_log_time = min_log_time
+        self._msg_displayed = False
+
+    def stop(self):
+        self._stop_event.set()
+
+    def stopped(self):
+        return self._stop_event.is_set()
+
+    def getStart(self):
+        return self.thread_start
+
+    def run(self):
+        self.thread_start = time.time()
+        while not self.stopped():
+            if (
+                self.msg is not None
+                and time.time() - self.thread_start > self.min_log_time
+                and not self._msg_displayed
+            ):
+                logger.opt(colors=True).info(f"Start {self.msg}")
+                self._msg_displayed = True
+            # include a delay here so the thread doesn't uselessly thrash the CPU
+            time.sleep(self.min_log_time / 5)
+
+
 @contextmanager
-def loguru_catchtime(msg, min_log_time=0) -> float:
-    """"Measure and log time with loguru as context manager."""
-    logger.opt(colors=True).info(msg)
-    start = perf_counter()
-    end=None
+def loguru_catchtime(msg, min_log_time=1) -> float:
+    """ "Measure and log time with loguru as context manager."""
+    start = time.perf_counter()
+    end = None
+    threadTimer = ElapsedTimeThread(msg=msg, min_log_time=min_log_time)
+    threadTimer.start()
     try:
         yield
-        end = perf_counter() - start
+        end = time.perf_counter() - start
     finally:
+        threadTimer.stop()
+        threadTimer.join()
         if end is None:
             logger.opt(colors=True).exception(f"{msg} failed")
 
@@ -45,8 +87,6 @@ def loguru_catchtime(msg, min_log_time=0) -> float:
         logger.opt(colors=True).success(
             f"{msg} done" f"<green> 🕑 {round(end, 3)}sec</green>"
         )
-
-# -
 
 
 def get_xi(*sources, xi=None):
@@ -119,7 +159,9 @@ def demag_tensor(
     if pairs_matching and split != 1:
         raise ValueError("Pairs matching does not support splitting")
     elif max_dist != 0:
-        getH_params, mask_inds, pos0, rot0 = filter_distance(src_list, max_dist)
+        mask_inds, getH_params, pos0, rot0 = filter_distance(
+            src_list, max_dist, return_params=False, return_base_geo=True
+        )
     elif pairs_matching:
         getH_params, mask_inds, unique_inv_inds, pos0, rot0 = match_pairs(src_list)
     else:
@@ -131,10 +173,12 @@ def demag_tensor(
     for unit_mag in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
         mag_all = rot0.inv().apply(unit_mag)
         # point matching field and demag tensor
-        with loguru_catchtime("getH with unit_mag={unit_mag}"):
+        with loguru_catchtime(f"getH with unit_mag={unit_mag}"):
             if pairs_matching or max_dist != 0:
                 magnetization = np.repeat(mag_all, len(src_list), axis=0)[mask_inds]
-                H_unique = magpy.getH("Cuboid", magnetization=magnetization, **getH_params)
+                H_unique = magpy.getH(
+                    "Cuboid", magnetization=magnetization, **getH_params
+                )
                 if max_dist != 0:
                     H_temp = np.zeros((len(src_list) ** 2, 3))
                     H_temp[mask_inds] = H_unique
@@ -175,12 +219,14 @@ def demag_tensor(
     return T
 
 
-def filter_distance(src_list, max_dist):
+def filter_distance(src_list, max_dist, return_params=False, return_base_geo=False):
     """filter indices by distance parameter"""
     with loguru_catchtime("Distance filter"):
-        all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+        all_cuboids = all(isinstance(src, Cuboid) for src in src_list)
         if not all_cuboids:
-            raise ValueError("filter_distance only implemented if all sources are Cuboids")
+            raise ValueError(
+                "filter_distance only implemented if all sources are Cuboids"
+            )
         pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
         rotQ0 = [src.orientation.as_quat() for src in src_list]
         rot0 = R.from_quat(rotQ0)
@@ -191,29 +237,37 @@ def filter_distance(src_list, max_dist):
         dim2 = np.tile(dim0, (len(dim0), 1)), np.repeat(dim0, len(dim0), axis=0)
         maxdim2 = np.concatenate(dim2, axis=1).max(axis=1)
         mask = (dist2 / maxdim2) < max_dist
-        params = dict(
-            observers=np.tile(pos0, (len(src_list), 1))[mask],
-            position=np.repeat(pos0, len(src_list), axis=0)[mask],
-            orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
-            dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
-        )
-        dsf = sum(~mask) / len(mask) * 100
-    log_msg = (
-        f"Distance factor savings: <blue>{dsf:.2f}%</blue>"
-    )
+        if return_params:
+            params = dict(
+                observers=np.tile(pos0, (len(src_list), 1))[mask],
+                position=np.repeat(pos0, len(src_list), axis=0)[mask],
+                orientation=R.from_quat(np.repeat(rotQ0, len(src_list), axis=0))[mask],
+                dimension=np.repeat(dim0, len(src_list), axis=0)[mask],
+            )
+        dsf = sum(mask) / len(mask) * 100
+    log_msg = f"Interaction pairs left after distance factor filtering: <blue>{dsf:.2f}%</blue>"
     if dsf == 0:
         logger.opt(colors=True).warning(log_msg)
     else:
         logger.opt(colors=True).success(log_msg)
-    return params, mask, pos0, rot0
+    out = [mask]
+    if return_params:
+        out.append(params)
+    if return_base_geo:
+        out.extend([pos0, rot0])
+    if len(out) == 1:
+        return out[0]
+    return tuple(out)
 
 
 def match_pairs(src_list):
     """match all pairs of sources from `src_list`"""
     with loguru_catchtime("Pairs matching"):
-        all_cuboids = all(src._object_type == "Cuboid" for src in src_list)
+        all_cuboids = all(isinstance(src, Cuboid) for src in src_list)
         if not all_cuboids:
-            raise ValueError("Pairs matching only implemented if all sources are Cuboids")
+            raise ValueError(
+                "Pairs matching only implemented if all sources are Cuboids"
+            )
         pos0 = np.array([getattr(src, "barycenter", src.position) for src in src_list])
         rotQ0 = [src.orientation.as_quat() for src in src_list]
         rot0 = R.from_quat(rotQ0)
@@ -229,13 +283,17 @@ def match_pairs(src_list):
             logger.info("dimension")
             dim2 = np.tile(dim0, (len_src, 1)) - np.repeat(dim0, len_src, axis=0)
             logger.info("concatenate properties")
-            prop = (np.concatenate([pos2, rotQ2a, rotQ2b, dim2], axis=1) + 1e-9).round(8)
+            prop = (np.concatenate([pos2, rotQ2a, rotQ2b, dim2], axis=1) + 1e-9).round(
+                8
+            )
             logger.info("find unique indices")
             _, unique_inds, unique_inv_inds = np.unique(
                 prop, return_index=True, return_inverse=True, axis=0
             )
-            sav_perc = 100 - len(unique_inds) / len(unique_inv_inds) * 100
-            logger.opt(colors=True).info(f"Pair matching savings: <blue>{sav_perc:.2f}%</blue>")
+            perc = len(unique_inds) / len(unique_inv_inds) * 100
+            logger.opt(colors=True).info(
+                f"Interaction pairs left after pair matching filtering: <blue>{perc:.2f}%</blue>"
+            )
 
         params = dict(
             observers=np.tile(pos0, (len(src_list), 1))[unique_inds],
@@ -246,41 +304,144 @@ def match_pairs(src_list):
     return params, unique_inds, unique_inv_inds, pos0, rot0
 
 
-def invert(quat, solver):
+def find_sources_to_refine(src_list, mag_diff_thresh=500, max_dist=1.5):
+    """Return a set of sources from `src_list` which meet following criteria for refinement:"
+    - relative-to-dimension pair of sources < `max_dist`
+    - norm(abs(mag1 -mag2)) > `mag_diff_thresh`
     """
-    quat inversion
+    len_src = len(src_list)
+    src_tile = np.tile(src_list, len_src)
+    src_repeat = np.repeat(src_list, len_src)
 
-    Parameters
-    ----------
-    quat: np.array, shape (n,n)
-        Input quat to be inverted.
+    dist_mask, pos0, rot0 = filter_distance(
+        src_list, max_dist=max_dist, return_base_geo=True
+    )
+    mag0 = [src.magnetization for src in src_list]
+    magr0 = rot0.apply(mag0)
+    mag2 = np.tile(magr0, (len_src, 1)) - np.repeat(magr0, len_src, axis=0)
+    norm = np.linalg.norm(np.abs(mag2), axis=1)
+    mag_mask = norm > mag_diff_thresh
+    full_mask = dist_mask & mag_mask
+    srcs_to_refine = set(src_tile[full_mask]).intersection(src_repeat[full_mask])
+    return srcs_to_refine
 
-    solver: str
-        Solver to be used. Must be one of (np.linalg.inv, ).
 
-    Returns
-    -------
-    quat_inverse: ndarray, shape (n,n)
-
-
-    TODO implement and test different solver packages
-    TODO check input quat and auto-select correct solver (direct, iterative, ...)
+def find_sources_to_refine2(src_list, mag_diff_thresh=10, max_dist=1):
+    """Return a set of sources from `src_list` which meet following criteria for refinement:"
+    - relative-to-dimension pair of sources < `max_dist`
+    - norm(abs(mag1 -mag2)) > `mag_diff_thresh`
     """
-    with loguru_catchtime(f'Matrix inversion with {solver}'):
-        if solver == "np.linalg.inv":
-            res = np.linalg.inv(quat)
-            return res
+    len_src = len(src_list)
+    src_tile = np.tile(src_list, len_src)
+    src_repeat = np.repeat(src_list, len_src)
 
-    raise ValueError("Bad solver input.")
+    dist_mask, pos0, rot0 = filter_distance(
+        src_list, max_dist=max_dist, return_base_geo=True
+    )
+    mag0 = [src.magnetization for src in src_list]
+    magr0 = rot0.apply(mag0)
+    mag2 = np.tile(magr0, (len_src, 1)) - np.repeat(magr0, len_src, axis=0)
+    mag2 = mag2[dist_mask]
+    src_tile = src_tile[dist_mask]
+    src_repeat = src_repeat[dist_mask]
+    mag_norm2 = np.linalg.norm(np.abs(mag2), axis=1)
+    # create index mask for the worst `mag_diff_thresh` percents, AFTER max_dist filtering
+    mag_mask = np.argsort(mag_norm2) >= min(
+        len(mag_norm2) - 1, (100 - mag_diff_thresh) / 100 * len(mag_norm2) - 1
+    )
+    srcs_to_refine = set(src_tile[mag_mask]).intersection(set(src_repeat[mag_mask]))
+    return srcs_to_refine
+
+
+def apply_demag_with_refinement(
+    collection,
+    inplace=False,
+    init_refine_factor=8,
+    refine_factor=2,
+    max_dist=2,
+    mag_diff_thresh=500,
+    max_passes=10,
+    max_elems=None,
+):
+    """apply demag iteratively and recursively with refinement options"""
+    if not inplace:
+        coll = collection.copy()
+    else:
+        coll = collection
+
+    # make initial refinement
+    if init_refine_factor > 1:
+        srcs_to_refine = [
+            src for src in coll.sources_all if isinstance(src, BaseMagnet)
+        ]
+        refine(*srcs_to_refine, factor=init_refine_factor)
+    # initialize
+    pass_num = 0
+    srcs_to_refine = True
+    # main loop
+
+    while pass_num < max_passes and srcs_to_refine:
+        pass_num += 1
+        logger.opt(colors=True).info(
+            f"Adaptive pass <blue>{pass_num} (max={max_passes})</blue>"
+        )
+        src_list = [src for src in coll.sources_all if isinstance(src, BaseMagnet)]
+        # store magnetizations before applying demag, to start next iteration with
+        # correct magnetizations
+        mags_before_demag = np.array([src._magnetization for src in src_list])
+        apply_demag(coll, inplace=True)
+        # only apply refinement if necessary, last step loop must be demag
+        if pass_num != max_passes and srcs_to_refine:
+            srcs_to_refine = find_sources_to_refine(
+                src_list, mag_diff_thresh=mag_diff_thresh, max_dist=max_dist
+            )
+            new_extra_src = refine_factor * len(srcs_to_refine)
+            if len(srcs_to_refine) == 0:
+                logger.opt(colors=True).success(
+                    "No Sources to be refined, <red>stopping adaptive passes</red>"
+                )
+            elif max_elems is not None and len(src_list) + new_extra_src > max_elems:
+                logger.opt(colors=True).info(
+                    f"Refinement stopped with {len(src_list)} cells ({max_elems=})."
+                    f" Further adaptive pass would result in {len(src_list) + new_extra_src} cells."
+                )
+                break
+            else:
+                a, b = len(srcs_to_refine), len(src_list)
+                logger.opt(colors=True).success(
+                    f" Sources refined : <blue>{len(srcs_to_refine)}/{len(src_list)} "
+                    f"({a/b*100:.2f}%)</blue>"
+                )
+                for src, mag in zip(src_list, mags_before_demag):
+                    src._magnetization = mag
+                refine(*srcs_to_refine, factor=refine_factor)
+    if not inplace:
+        return coll
+
+
+def refine(*sources, factor):
+    """refine sources and replace them inplace with a meshed collection"""
+    for src in sources:
+        if not isinstance(src, magpy.magnet.Cuboid):
+            raise TypeError(
+                "Refinement only supports Cuboids at the moment. "
+                f"Received {src.__class__.__name__} instead"
+            )
+        parent = src.parent
+        xi = get_xi(src)[0]
+        src.parent = None
+        meshed_coll = mesh_Cuboid(src, factor)
+        for child in meshed_coll:
+            child.xi = xi
+        parent.add(meshed_coll)
 
 
 def apply_demag(
     collection,
     xi=None,
-    solver="np.linalg.inv",
     demag_store=False,
     demag_load=False,
-    inplace=True,
+    inplace=False,
     pairs_matching=False,
     max_dist=0,
     split=1,
@@ -297,9 +458,6 @@ def apply_demag(
     xi: array_like, shape (n,)
         Vector of n magnetic susceptibilities of the cells. If not defined, values are searched at
         object level or parent level if needed.
-
-    solver: str, default='np.linalg.inv'
-        Solver to be used. Must be one of (np.linalg.inv, ).
 
     demag_store: `False` or filename (str)
         Store demagnetization tensor T after computation as filename.npy.
@@ -337,53 +495,79 @@ def apply_demag(
         collection = collection.copy()
     if style is not None:
         collection.style = style
-
-    src_list = collection.sources_all
-    n = len(src_list)
-    counts = Counter(s._object_type for s in src_list)
-    inplace_str =  f"""{" (inplace) " if inplace else " "}"""
+    srcs = collection.sources_all
+    magnets_list = [src for src in srcs if isinstance(src, BaseMagnet)]
+    currents_list = [src for src in srcs if isinstance(src, BaseCurrent)]
+    others_list = [
+        src
+        for src in srcs
+        if not isinstance(src, (BaseMagnet, BaseCurrent, magpy.Sensor))
+    ]
+    if others_list:
+        raise TypeError(
+            "Only Magnet and Current sources supported. "
+            "Incompatible objects found: "
+            f"{Counter(s.__class__.__name__ for s in others_list)}"
+        )
+    n = len(magnets_list)
+    counts = Counter(s.__class__.__name__ for s in magnets_list)
+    inplace_str = f"""{" (inplace) " if inplace else " "}"""
     demag_msg = (
         f"Demagnetization computation{inplace_str}of <blue>{collection}</blue>"
         f" with {n} cells - {counts}"
     )
     with loguru_catchtime(demag_msg):
         # set up mr
-        mag = [
-            src.orientation.apply(src.magnetization) for src in src_list
+        mag_magnets = [
+            src.orientation.apply(src.magnetization) for src in magnets_list
         ]  # ROTATION CHECK
-        mag = np.reshape(
-            mag, (3 * n, 1), order="F"
+        mag_magnets = np.reshape(
+            mag_magnets, (3 * n, 1), order="F"
         )  # shape ii = x1, ... xn, y1, ... yn, z1, ... zn
 
         # set up S
         if xi is None:
-            xi = get_xi(*src_list)
+            xi = get_xi(*magnets_list)
         xi = np.array(xi)
         if len(xi) != n:
-            raise ValueError("Apply_demag input collection and xi must have same length.")
+            raise ValueError(
+                "Apply_demag input collection and xi must have same length."
+            )
         S = np.diag(np.tile(xi, 3))  # shape ii, jj
 
         # set up T (3 mag unit, n cells, n positions, 3 Bxyz)
         with loguru_catchtime("Demagnetization tensor calculation"):
             T = demag_tensor(
-                src_list,
+                magnets_list,
                 store=demag_store,
                 load=demag_load,
                 split=split,
                 pairs_matching=pairs_matching,
                 max_dist=max_dist,
             )
-        # T = T.swapaxes(0, 3)
-        T = T * (4 * np.pi / 10)
-        T = T.swapaxes(2, 3)
-        T = np.reshape(T, (3 * n, 3 * n)).T  # shape ii, jj
 
-        # set up and invert Q
+            T *= 4 * np.pi / 10
+            T = T.swapaxes(2, 3).reshape((3 * n, 3 * n)).T  # shape ii, jj
+
+        mag_tolal = mag_magnets
+
+        if currents_list:
+            with loguru_catchtime(
+                "Incorporate magnetic field contributions from current sources",
+                min_log_time=1,
+            ):
+                pos = np.array([src.position for src in magnets_list])
+                mag_currents = magpy.getB(currents_list, pos, sumup=True)
+                mag_currents = np.reshape(mag_currents, (3 * n, 1), order="F")
+                mag_tolal += np.matmul(S, mag_currents)
+
+        # set up Q
         Q = np.eye(3 * n) - np.matmul(S, T)
-        Q_inv = invert(quat=Q, solver=solver)
 
         # determine new magnetization vectors
-        mag_new = np.matmul(Q_inv, mag)
+        with loguru_catchtime("Solving of linear system", min_log_time=1):
+            mag_new = np.linalg.solve(Q, mag_tolal)
+
         mag_new = np.reshape(mag_new, (n, 3), order="F")
         # mag_new *= .4*np.pi
 

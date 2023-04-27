@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from demag_functions import apply_demag, match_pairs
+from demag_functions import apply_demag, apply_demag_with_refinement
 from meshing_functions import mesh_Cuboid
 
 magpy.defaults.display.backend = "plotly"
@@ -35,49 +35,55 @@ magpy.defaults.display.backend = "plotly"
 
 ```{code-cell} ipython3
 # number of target mesh elements
-target_cells = 200
+target_cells = 2
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
-coll1 = mesh_Cuboid(cube1, target_cells)
-coll1.move((-1.5, 0, 0))
-coll1.xi = 0.3  # mur=1.3
+cube1.move((-1.5, 0, 0))
+cube1.xi = 0.3  # mur=1.3
 
 cube2 = magpy.magnet.Cuboid(magnetization=(900, 0, 0), dimension=(1, 1, 1))
-coll2 = mesh_Cuboid(cube2, target_cells)
-coll2.rotate_from_angax(-45, "y").move((0, 0, 0.2))
-coll2.xi = 1.0  # mur=2.0
+cube2.rotate_from_angax(-45, "y").move((0, 0, 0.2))
+cube2.xi = 1.0  # mur=2.0
 
 mx, my = 600 * np.sin(30 / 180 * np.pi), 600 * np.cos(30 / 180 * np.pi)
 cube3 = magpy.magnet.Cuboid(magnetization=(mx, my, 0), dimension=(1, 1, 2))
-coll3 = mesh_Cuboid(cube3, target_cells)
-coll3.move((1.6, 0, 0.5)).rotate_from_angax(30, "z")
-coll3.xi = 0.5  # mu3=1.5
+cube3.move((1.6, 0, 0.5)).rotate_from_angax(30, "z")
+cube3.xi = 0.5  # mu3=1.5
 
 # collection of all cells
-coll = magpy.Collection(coll1, coll2, coll3)
+COLL0 = magpy.Collection(cube1, cube2, cube3)
 
 # sensor
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 
 # compute field before demag
-B0 = sensor.getB(coll)
+B0 = sensor.getB(COLL0)
 
-coll.show()
+COLL0.show()
 ```
 
 # Demagnetization computation
 
 ```{code-cell} ipython3
-# apply demag
-colls = [apply_demag(coll, style={"label": "Full demag"})]
+kwargs = dict(max_passes=8, refine_factor=2, max_dist=3, mag_diff_thresh=200)
+coll = apply_demag_with_refinement(collection=COLL0, **kwargs)
 ```
 
 ```{code-cell} ipython3
-colls[0].show()
+magpy.show(coll.sources_all, style_magnetization_show=False)
 ```
 
 # Compare demagnetization methods with FEM
+
+```{code-cell} ipython3
+coll0 = COLL0.copy()
+coll0.style.label = "No demag"
+coll.style.label = f"elems={len(coll.sources_all)}, {kwargs}"
+
+colls = [coll]
+#colls.append(coll0)
+```
 
 ```{code-cell} ipython3
 B_cols = ["Bx [mT]", "By [mT]", "Bz [mT]"]
@@ -143,8 +149,4 @@ fig2 = px.line(
 )
 fig2.update_yaxes(matches=None, showticklabels=True)
 display(fig1, fig2)
-```
-
-```{code-cell} ipython3
-
 ```

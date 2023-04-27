@@ -1,11 +1,11 @@
 ---
 jupytext:
-  formats: md:myst,ipynb
+  formats: md:myst
   text_representation:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.7
+    jupytext_version: 1.14.5
 kernelspec:
   display_name: Python 3 (ipykernel)
   language: python
@@ -31,7 +31,7 @@ from meshing_functions import mesh_Cuboid
 magpy.defaults.display.backend = "plotly"
 
 # number of target mesh elements
-target_cells = 200
+target_cells = 20
 
 # some low quality magnets with different parameters split up into cells
 cube1 = magpy.magnet.Cuboid(magnetization=(0, 0, 1000), dimension=(1, 1, 1))
@@ -56,8 +56,6 @@ COLL0 = magpy.Collection(coll1, coll2, coll3)
 # sensor
 sensor = magpy.Sensor(position=np.linspace((-4, 0, -1), (4, 0, -1), 301))
 ```
-
-+++ {"tags": []}
 
 # Matching Interactions
 
@@ -141,7 +139,7 @@ def show_filter_distance(collection):
     fig.add_scatter3d()
 
     def update_fig(group_index, max_dist):
-        params, mask, pos0, rot0 = filter_distance(src_list, max_dist=max_dist)
+        mask, params, pos0, rot0 = filter_distance(src_list, max_dist=max_dist, return_base_geo=True, return_params=True)
         bary2 = np.concatenate(
             [np.tile(pos0, (len(pos0), 1)), np.repeat(pos0, len(pos0), axis=0)], axis=1
         ).reshape((-1, 2, 3))
@@ -185,7 +183,7 @@ def show_filter_distance(collection):
     w = widgets.interactive(update_fig, group_index=slider_index, max_dist=max_dist_slider)
     w.update()
 
-    display(widgets.VBox([slider_index,max_dist_slider]), fig)
+    display(widgets.VBox([slider_index,max_dist_slider]), fig, w.out)
 
 show_filter_distance(COLL0)
 ```

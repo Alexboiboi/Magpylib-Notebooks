@@ -1,11 +1,11 @@
 ---
 jupytext:
-  formats: md:myst,ipynb
+  formats: md:myst
   text_representation:
     extension: .md
     format_name: myst
     format_version: 0.13
-    jupytext_version: 1.13.7
+    jupytext_version: 1.14.5
 kernelspec:
   display_name: Python 3 (ipykernel)
   language: python
@@ -108,9 +108,9 @@ for obj in objs:
     mesh1 = mesh_with_cubes(obj, 200, strict_inside=False)
     mesh2 = mesh_with_cubes(obj, 200, strict_inside=True)
 
-    print(f"{obj._object_type} meshed ({len(mesh1)} cubes)")
+    print(f"{obj.___class__.__name__} meshed ({len(mesh1)} cubes)")
     magpy.show(obj, *mesh1)
-    print(f"{obj._object_type} stric-inside ({len(mesh2)} cubes)")
+    print(f"{obj.___class__.__name__} stric-inside ({len(mesh2)} cubes)")
     magpy.show(obj, *mesh2)
 ```
 

@@ -1,12 +1,9 @@
-# +
 from itertools import product
 
 import magpylib as magpy
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
-
-# -
 
 def apportion_triple(triple, min_val=1, max_iter=30):
     """Apportion values of a triple, so that the minimum value `min_val` is respected
@@ -23,6 +20,7 @@ def apportion_triple(triple, min_val=1, max_iter=30):
             triple /= factor**0.5
             triple[amin] *= factor**1.5
     return triple
+
 
 def cells_from_dimension(
     dim,
@@ -108,7 +106,7 @@ def cells_from_dimension(
     return np.array(result).astype(int)
 
 
-def mesh_Cuboid(cuboid, target_elems, verbose=False):
+def mesh_Cuboid(cuboid, target_elems, verbose=False, **kwargs):
     """
     Split Magpylib cuboid up into small cuboid cells
 
@@ -164,7 +162,54 @@ def mesh_Cuboid(cuboid, target_elems, verbose=False):
     # create cells as magpylib objects and return Collection
     cells = [magpy.magnet.Cuboid(mag, new_dim, pp, rot) for pp in grid]
 
-    return magpy.Collection(cells)
+    return magpy.Collection(cells, **kwargs)
+
+
+def mesh_cuboids_with_cuboids(obj, target_elems, inplace=False):
+    """
+    Mesh a Cuboid or Collection of Cuboids with a target number of elements.
+
+    Parameters
+    ----------
+    obj : magpy.magnet.Cuboid or magpy.Collection
+        The Cuboid or Collection to mesh.
+    target_elems : int
+        The target number of elements for the mesh.
+    inplace : bool, optional
+        If True, perform the mesh operation in-place, modifying the original
+        object. If False, create a new object with the mesh operation applied.
+        Default is False.
+
+    Returns
+    -------
+    obj : magpy.magnet.Cuboid or magpy.Collection
+        The meshed Cuboid or Collection.
+
+    Notes
+    -----
+    This function recursively processes any child objects within the input
+    Collection, performing the mesh operation on each.
+    """
+    if isinstance(obj, magpy.magnet.Cuboid):
+        label = obj.style.label
+        xi = getattr(obj, "xi", None)
+        cuboid_meshed = mesh_Cuboid(obj, target_elems, style_label=label)
+        if inplace:
+            parent = obj.parent
+            obj.parent = None
+            parent.add(cuboid_meshed)
+        if xi is not None:
+            cuboid_meshed.xi = xi
+        obj = cuboid_meshed
+    elif isinstance(obj, magpy.Collection):
+        if not inplace:
+            obj = obj.copy()
+        children = list(
+            obj.children
+        )  # otherwise children list is changed while looping!!
+        for child in children:
+            mesh_cuboids_with_cuboids(child, target_elems, inplace=True)
+    return obj
 
 
 def mesh_Cylinder(cylinder, target_elems, verbose=False):
@@ -231,7 +276,6 @@ def mesh_Cylinder(cylinder, target_elems, verbose=False):
             pos_h = dh * h_ind - h / 2 + dh / 2
             # use a cylinder for the innermost cells, cylinder segment otherwise
             if r[r_ind] == 0 and phi2 - phi1 == 360:
-                cylinder_class = magpy.magnet.Cylinder
                 dimension = r[r_ind + 1] * 2, dh
                 cs = magpy.magnet.Cylinder(
                     magnetization=mag, dimension=dimension, position=(0, 0, pos_h)
@@ -257,19 +301,19 @@ def get_volume(obj, return_containing_cube_edge=False):
     """Return object volume in mm^3. The `containting_cube_edge` is the mininum side length of an
     unrotated cube centered at the origin containing the object.
     """
-    if obj._object_type == "Cuboid":
+    if obj.__class__.__name__ == "Cuboid":
         dim = obj.dimension
         vol = dim[0] * dim[1] * dim[2]
         containing_cube_edge = max(obj.dimension)
-    elif obj._object_type == "Cylinder":
+    elif obj.__class__.__name__ == "Cylinder":
         d, h = obj.dimension
         vol = h * np.pi * (d / 2) ** 2
         containing_cube_edge = max(d, h)
-    elif obj._object_type == "CylinderSegment":
+    elif obj.__class__.__name__ == "CylinderSegment":
         r1, r2, h, phi1, phi2 = obj.dimension
         vol = h * np.pi * (r2**2 - r1**2) * (phi2 - phi1) / 360
         containing_cube_edge = max(h, 2 * r2)
-    elif obj._object_type == "Sphere":
+    elif obj.__class__.__name__ == "Sphere":
         vol = 4 / 3 * np.pi * (obj.diameter / 2) ** 3
         containing_cube_edge = obj.diameter
     else:
@@ -364,10 +408,11 @@ def mask_inside(obj, positions, tolerance=1e-14):
         "Sphere": mask_inside_Sphere,
         "CylinderSegment": mask_inside_CylinderSegment,
     }
-    func = mask_inside_funcs.get(obj._object_type, None)
+    func = mask_inside_funcs.get(obj.__class__.__name__, None)
     if func is None:
         raise TypeError("Unsupported object type for inside masking")
     return func(obj, positions, tolerance)
+
 
 def mesh_with_cubes(obj, target_elems, strict_inside=True):
     """
@@ -479,3 +524,56 @@ def mesh_thin_CylinderSegment_with_cuboids(cyl_seg, target_elems, thin_ratio_lim
     col.orientation = cyl_seg.orientation
     col.position = cyl_seg.position
     return col
+
+
+def slice_Cuboid(cuboid, shift=0.5, axis="z", **kwargs):
+    """
+    Slice a cuboid magnet along a specified axis and return a collection of the resulting parts.
+
+    Parameters
+    ----------
+    cuboid : magpy.magnet.Cuboid
+        The cuboid to be sliced.
+    shift : float, optional, default=0.5
+        The relative position of the slice along the specified axis, ranging from
+        0 to 1 (exclusive).
+    axis : {'x', 'y', 'z'}, optional, default='z'
+        The axis along which to slice the cuboid.
+    **kwargs
+        Additional keyword arguments to pass to the magpy.Collection constructor.
+
+    Returns
+    -------
+    coll : magpy.Collection
+        A collection of the resulting parts after slicing the cuboid.
+
+    Raises
+    ------
+    ValueError
+        If the shift value is not between 0 and 1 (exclusive).
+    """
+    if not 0 < shift < 1:
+        raise ValueError("Shift must be between 0 and 1 (exclusive)")
+    dim0 = cuboid.dimension
+    mag0 = cuboid.magnetization
+    xi = getattr(magpy, "xi", None)
+    ind = "xyz".index(axis)
+    dim_k = cuboid.dimension[ind]
+    dims_k = dim_k * (1 - shift), dim_k * (shift)
+    shift_k = (dim_k - dims_k[0]) / 2, -(dim_k - dims_k[1]) / 2
+    children = []
+    for d, s in zip(dims_k, shift_k):
+        dimension = dim0.copy()
+        dimension[ind] = d
+        position = np.array([0, 0, 0], dtype=float)
+        position[ind] = s
+        child = magpy.magnet.Cuboid(
+            magnetization=mag0, dimension=dimension, position=position
+        )
+        if xi is not None:
+            child.xi = xi
+        children.append(child)
+    coll = magpy.Collection(children, **kwargs)
+    coll.orientation = cuboid.orientation
+    coll.position = cuboid.position
+    return coll
